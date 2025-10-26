@@ -1,1 +1,3984 @@
-print("atualizado")
+setDefaultTab("Tools")
+
+-- ============================================================
+-- TADALA COLETOR DE PLANTAS - VISUAL COM HOTKEY NO SETUP
+-- ============================================================
+
+-- Configuração inicial
+if not storage.ColectConfig then
+  storage.ColectConfig = {
+    enabled = false,
+    hotkey = "Insert", -- tecla padrão
+    backpackId = 23721,
+    backpackItem = {id = 23721, count = 1},
+    plantItems = {
+      {id = 2644}, {id = 3043}, {id = 2983}, {id = 2984},
+      {id = 2981}, {id = 44785}, {id = 44792}, {id = 32583},
+      {id = 22516}, {id = 22720}, {id = 22721}, {id = 8763}
+    }
+  }
+end
+
+-- ========================= FUNÇÕES ===========================
+local function getAdjacentPositions(centerPos)
+  local positions = {}
+  for dx = -1, 1 do
+    for dy = -1, 1 do
+      if dx ~= 0 or dy ~= 0 then
+        table.insert(positions, {x = centerPos.x + dx, y = centerPos.y + dy, z = centerPos.z})
+      end
+    end
+  end
+  return positions
+end
+
+local function findTargetContainer()
+  for _, container in pairs(g_game.getContainers()) do
+    local item = container:getContainerItem()
+    if item and item:getId() == storage.ColectConfig.backpackId then
+      return container
+    end
+  end
+  return nil
+end
+
+local function getPlantIds()
+  local ids = {}
+  for _, entry in pairs(storage.ColectConfig.plantItems or {}) do
+    table.insert(ids, entry.id)
+  end
+  return ids
+end
+
+local function collectPlants(targetContainer)
+  local idz = getPlantIds()
+  local playerPos = pos()
+  local nearbyPositions = getAdjacentPositions(playerPos)
+  table.insert(nearbyPositions, playerPos)
+
+  for _, pos in ipairs(nearbyPositions) do
+    local tile = g_map.getTile(pos)
+    if tile then
+      local things = tile:getThings()
+      for _, thing in ipairs(things) do
+        if thing:isItem() and table.find(idz, thing:getId()) then
+          g_game.move(thing, targetContainer:getSlotPosition(), thing:getCount())
+        end
+      end
+    end
+  end
+end
+
+-- ============================================================
+-- MACRO PRINCIPAL
+-- ============================================================
+local colectMacro
+
+colectMacro = macro(100, function()
+  if not g_game.isOnline() then return end
+  if colectMacro:isOff() then return end
+
+  local container = findTargetContainer()
+  if not container then
+    warn("Abra a backpack Noob! ID " .. storage.ColectConfig.backpackId)
+    return
+  end
+  collectPlants(container)
+end)
+
+colectMacro:setOff()
+
+-- ============================================================
+-- INTERFACE DE CONFIGURAÇÃO (BACKPACK + PLANTAS + HOTKEY)
+-- ============================================================
+g_ui.loadUIFromString([[
+
+ColectConfigWindow < MainWindow
+  text: Tadala Coletor
+  size: 260 360
+
+  Label
+    id: lblTitle
+    text: Configuracao do Coletor
+    anchors.top: parent.top
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-top: 10
+    text-align: center
+    color: #00BFFF
+
+  Label
+    id: lblBackpack
+    text: Backpack Colect:
+    anchors.top: lblTitle.bottom
+    anchors.left: parent.left
+    margin-top: 15
+    margin-left: 10
+    height: 18
+
+  BotItem
+    id: BackpackItem
+    anchors.top: lblBackpack.bottom
+    anchors.left: parent.left
+    margin-left: 10
+    margin-top: 5
+    width: 40
+    height: 40
+
+  Label
+    id: lblPlantas
+    text: Itens para coletar:
+    anchors.top: BackpackItem.bottom
+    anchors.left: parent.left
+    margin-top: 15
+    margin-left: 10
+    height: 18
+
+  BotContainer
+    id: PlantContainer
+    anchors.top: lblPlantas.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-left: 10
+    margin-right: 10
+    height: 70
+
+  Label
+    id: lblHotkey
+    text: Hotkey de ativacao:
+    anchors.top: PlantContainer.bottom
+    anchors.left: parent.left
+    margin-top: 15
+    margin-left: 10
+    height: 18
+
+  TextEdit
+    id: editHotkey
+    anchors.top: lblHotkey.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-left: 10
+    margin-right: 10
+    height: 20
+
+  Button
+    id: btnSave
+    text: Salvar
+    anchors.bottom: parent.bottom
+    anchors.left: parent.left
+    margin-left: 15
+    margin-bottom: 10
+    width: 80
+
+  Button
+    id: btnClose
+    text: Fechar
+    anchors.bottom: parent.bottom
+    anchors.right: parent.right
+    margin-right: 15
+    margin-bottom: 10
+    width: 80
+]])
+
+local configWindow
+local colectHotkey = nil -- variável global pra guardar hotkey dinâmica
+
+schedule(100, function()
+  local root = g_ui.getRootWidget()
+  if not root then return end
+
+  configWindow = UI.createWindow('ColectConfigWindow', root)
+  configWindow:hide()
+
+  -- Carrega backpack
+  if storage.ColectConfig.backpackItem and storage.ColectConfig.backpackItem.id then
+    configWindow.BackpackItem:setItemId(storage.ColectConfig.backpackItem.id)
+  end
+
+  -- Cria container de plantas
+  UI.Container(function()
+    local items = configWindow.PlantContainer:getItems() or {}
+    storage.ColectConfig.plantItems = items
+  end, true, nil, configWindow.PlantContainer)
+  configWindow.PlantContainer:setItems(storage.ColectConfig.plantItems or {})
+
+  -- Carrega hotkey
+  configWindow.editHotkey:setText(storage.ColectConfig.hotkey or "Insert")
+
+  -- Salvar configurações
+  configWindow.btnSave.onClick = function()
+    -- Backpack
+    local item = configWindow.BackpackItem:getItem()
+    if item then
+      storage.ColectConfig.backpackItem = {id = item:getId(), count = item:getCount()}
+      storage.ColectConfig.backpackId = item:getId()
+    end
+
+    -- Plantas
+    local items = configWindow.PlantContainer:getItems() or {}
+    storage.ColectConfig.plantItems = items
+
+    -- Hotkey
+    storage.ColectConfig.hotkey = configWindow.editHotkey:getText()
+
+    configWindow:hide()
+    reloadColectHotkey() -- recria a hotkey imediatamente
+  end
+
+  configWindow.btnClose.onClick = function()
+    configWindow:hide()
+  end
+end)
+
+-- ============================================================
+-- ICONE DE ATIVAÇÃO
+-- ============================================================
+local colectIcon = addIcon("Colect", {item = 2983, text = "Colect"}, function(icon, isOn)
+  storage.ColectConfig.enabled = isOn
+  if isOn then
+    icon.text:setColor('#00FF00')
+    colectMacro:setOn()
+  else
+    icon.text:setColor('#FFFFFF')
+    colectMacro:setOff()
+  end
+end)
+
+local MOUSE_RIGHT_BUTTON = 2
+colectIcon.onMousePress = function(widget, pos, button)
+  if button == MOUSE_RIGHT_BUTTON then
+    if configWindow then
+      configWindow:show()
+      configWindow:raise()
+      configWindow:focus()
+    end
+    return true
+  end
+  return false
+end
+
+if storage.ColectConfig.enabled then
+  colectMacro:setOff()
+end
+
+-- ============================================================
+-- HOTKEY CONFIGURÁVEL
+-- ============================================================
+local currentColectHotkeyKey = nil
+
+function reloadColectHotkey()
+  local key = storage.ColectConfig.hotkey or "Insert"
+
+  -- evita recriar se a tecla for a mesma
+  if currentColectHotkeyKey == key then
+    return
+  end
+
+  currentColectHotkeyKey = key
+
+  colectHotkey = hotkey(key, function()
+    local newState = not storage.ColectConfig.enabled
+    storage.ColectConfig.enabled = newState
+
+    if colectIcon and colectIcon.setOn then
+      colectIcon:setOn(newState)
+    end
+
+    if newState then
+      colectMacro:setOn()
+      colectIcon.text:setColor('#00FF00')
+    else
+      colectMacro:setOff()
+      colectIcon.text:setColor('#FFFFFF')
+    end
+  end)
+end
+
+
+
+reloadColectHotkey()
+setDefaultTab("Tools")
+
+-- ============================================================
+-- TADALA FLOWER - FULL (PLANTA IMEDIATO + HOLD AUTO RENOVA)
+-- ============================================================
+
+if not storage.TadalaFlowerConfig then
+  storage.TadalaFlowerConfig = {
+    hotkey = "N",
+    delay = 200,
+    flowerIds = {3465, 2981, 2982, 2983, 2984, 2985, 2986, 2987, 2988}
+  }
+end
+
+FLOWER_TILES = {}
+
+-- ============================================================
+-- FUNCOES
+-- ============================================================
+local function tablefind(tab, val)
+  for i, v in ipairs(tab) do
+    if v == val then return i end
+  end
+  return nil
+end
+
+  
+
+local function checkFlower(tile)
+  for _, id in ipairs(storage.TadalaFlowerConfig.flowerIds or {}) do
+    for _, item in ipairs(tile:getItems()) do
+      if item:getId() == id then return true end
+    end
+  end
+  return false
+end
+
+local function throwFlower(tile)
+    if not tile then return false end
+  
+    -- bloqueios comuns (MW, parsel, paredes, portas, etc.)
+    local blockIds = {
+      2129, 2128, 2127, 2126, 2125, -- magic walls comuns
+      2130, 2131, 2132, 2133, -- energy walls
+      2134, 2135, 2136, 2137, -- fire walls
+      3135, 294, 385, 386, 369, 430, 432, 518, 5268, 1368, 1386,
+      3678, 5543, 17394, 413, 434, 2772, 425, 2773, 7716, 8259
+    }
+  
+    -- se existir item bloqueador no sqm, cancela
+    local top = tile:getTopThing()
+    if top and top:isItem() and table.find(blockIds, top:getId()) then
+      return false
+    end
+  
+    -- se já existe flor nesse sqm, não joga
+    if checkFlower(tile) then return false end
+  
+    -- tenta pegar uma flor de qualquer container
+    for _, id in ipairs(storage.TadalaFlowerConfig.flowerIds or {}) do
+      local flower = findItem(id)
+      if flower and flower:isItem() then
+        local success = pcall(function()
+          g_game.move(flower, tile:getPosition(), 1)
+        end)
+        return success or false
+      end
+    end
+  
+    return false
+  end
+-- ============================================================
+-- MACRO PRINCIPAL (renova igual ao Full Planta)
+-- ============================================================
+macro(1, "", function()
+  if #FLOWER_TILES == 0 then return end
+
+  for _, tile in pairs(FLOWER_TILES) do
+    if getDistanceBetween(pos(), tile:getPosition()) > 7 then
+      tile:setText("")
+      table.remove(FLOWER_TILES, tablefind(FLOWER_TILES, tile))
+    else
+      if tile:getPosition().z == posz() and tile:canShoot() then
+        -- replanta imediatamente se e HOLD e flor sumiu
+        if tile:getText() == "FLOWER HOLD" and not checkFlower(tile) then
+          throwFlower(tile)
+          delay(math.max(50, math.min(storage.TadalaFlowerConfig.delay or 200, 1000)))
+        end
+      end
+    end
+  end
+end)
+
+-- ============================================================
+-- EVENTOS (reage a adicao e remocao de flores)
+-- ============================================================
+
+onAddThing(function(tile, thing)
+  if not tile then return end
+  if tile:getText():find("^FLOWER") then
+    for _, id in ipairs(storage.TadalaFlowerConfig.flowerIds or {}) do
+      if thing:getId() == id then
+        -- se nao for HOLD, limpa o sqm
+        if tile:getText() ~= "FLOWER HOLD" then
+          tile:setText("")
+          table.remove(FLOWER_TILES, tablefind(FLOWER_TILES, tile))
+        end
+        return
+      end
+    end
+  end
+end)
+
+-- replantar automaticamente quando a flor e removida
+onRemoveThing(function(tile, thing)
+  if not tile then return end
+  if tile:getText() == "FLOWER HOLD" then
+    for _, id in ipairs(storage.TadalaFlowerConfig.flowerIds or {}) do
+      if thing:getId() == id then
+        schedule(10, function()
+          if tile:canShoot() and not checkFlower(tile) then
+            throwFlower(tile)
+          end
+        end)
+        return
+      end
+    end
+  end
+end)
+
+-- ============================================================
+-- HOTKEY EXECUTORA (1x planta, 2x hold, 3x limpa)
+-- ============================================================
+local currentTile = nil
+local doubleClickTimer = now
+
+local function flowerHotkeyAction()
+  local tile = getTileUnderCursor()
+  if not tile then return end
+
+  -- 2x clique rapido = HOLD
+  if currentTile == tile and (now - doubleClickTimer) <= 500 then
+    tile:setText("FLOWER HOLD")
+    table.insert(FLOWER_TILES, tile)
+    if not checkFlower(tile) then
+      throwFlower(tile)
+    end
+    return
+  end
+
+  -- 1x clique = planta unica
+  if not tile:getText():find("^FLOWER") then
+    tile:setText("FLOWER")
+    doubleClickTimer = now
+    currentTile = tile
+    table.insert(FLOWER_TILES, tile)
+    if not checkFlower(tile) then
+      throwFlower(tile)
+    end
+    schedule(storage.TadalaFlowerConfig.delay or 200, function()
+      tile:setText("")
+      table.remove(FLOWER_TILES, tablefind(FLOWER_TILES, tile))
+    end)
+    return
+  end
+
+  -- 3x clique = limpa sqm
+  if tile:getText():find("^FLOWER") then
+    tile:setText("")
+    table.remove(FLOWER_TILES, tablefind(FLOWER_TILES, tile))
+  end
+end
+
+-- ============================================================
+-- SETUP (interface)
+-- ============================================================
+g_ui.loadUIFromString([[
+TadalaFlowerConfigWindow < MainWindow
+  text: Tadala Flower
+  size: 260 320
+
+  Label
+    id: lblTitle
+    text: Configuracao do Flower
+    anchors.top: parent.top
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-top: 10
+    text-align: center
+    color: #00BFFF
+
+  Label
+    id: lblHotkey
+    text: Escreva a Htk :
+    anchors.top: lblTitle.bottom
+    anchors.left: parent.left
+    margin-top: 15
+    margin-left: 70
+
+  TextEdit
+    id: editHotkey
+    anchors.top: lblHotkey.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-left: 10
+    margin-right: 10
+    height: 20
+    text-align: center
+
+  Label
+    id: lblDelay
+    text: Delay (50-1000 ms):
+    anchors.top: editHotkey.bottom
+    anchors.left: parent.left
+    margin-top: 15
+    margin-left: 10
+
+  HorizontalScrollBar
+    id: delayBar
+    anchors.top: lblDelay.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-left: 10
+    margin-right: 10
+    minimum: 50
+    maximum: 1000
+    step: 10
+    height: 15
+
+  Label
+    id: lblDelayValue
+    text: 200 ms
+    anchors.top: delayBar.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-top: 5
+    text-align: center
+    color: #AAAAAA
+
+  Label
+    id: lblFlores
+    text: Id PLantas:
+    anchors.top: lblDelayValue.bottom
+    anchors.left: parent.left
+    margin-top: 15
+    margin-left: 85
+
+  BotContainer
+    id: FlowerContainer
+    anchors.top: lblFlores.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-left: 10
+    margin-right: 10
+    height: 80
+
+  Button
+    id: btnSave
+    text: Salvar
+    anchors.bottom: parent.bottom
+    anchors.left: parent.left
+    margin-left: 15
+    margin-bottom: 10
+    width: 80
+
+  Button
+    id: btnClose
+    text: Fechar
+    anchors.bottom: parent.bottom
+    anchors.right: parent.right
+    margin-right: 15
+    margin-bottom: 10
+    width: 80
+]])
+
+local configWindow
+
+schedule(100, function()
+  local root = g_ui.getRootWidget()
+  if not root then return end
+  configWindow = UI.createWindow('TadalaFlowerConfigWindow', root)
+  configWindow:hide()
+
+  configWindow.editHotkey:setText(storage.TadalaFlowerConfig.hotkey or "N")
+  configWindow.delayBar:setValue(storage.TadalaFlowerConfig.delay or 200)
+  configWindow.lblDelayValue:setText((storage.TadalaFlowerConfig.delay or 200) .. " ms")
+
+  configWindow.delayBar.onValueChange = function(widget, value)
+    storage.TadalaFlowerConfig.delay = value
+    configWindow.lblDelayValue:setText(value .. " ms")
+  end
+
+  UI.Container(function()
+    local items = configWindow.FlowerContainer:getItems() or {}
+    storage.TadalaFlowerConfig.flowerIds = {}
+    for _, it in ipairs(items) do
+      table.insert(storage.TadalaFlowerConfig.flowerIds, it.id)
+    end
+  end, true, nil, configWindow.FlowerContainer)
+
+  local initialItems = {}
+  for _, id in ipairs(storage.TadalaFlowerConfig.flowerIds or {}) do
+    table.insert(initialItems, {id = id, count = 1})
+  end
+  configWindow.FlowerContainer:setItems(initialItems)
+
+  configWindow.btnSave.onClick = function()
+    storage.TadalaFlowerConfig.hotkey = configWindow.editHotkey:getText()
+    local items = configWindow.FlowerContainer:getItems() or {}
+    storage.TadalaFlowerConfig.flowerIds = {}
+    for _, it in ipairs(items) do
+      table.insert(storage.TadalaFlowerConfig.flowerIds, it.id)
+    end
+    configWindow:hide()
+    reloadFlowerHotkey()
+  end
+
+  configWindow.btnClose.onClick = function()
+    configWindow:hide()
+  end
+end)
+
+-- ============================================================
+-- ICONE E HOTKEY
+-- ============================================================
+local flowerIcon = addIcon("TadalaFlower", {item = 2984, text = "FLOW"}, function() end)
+
+flowerIcon.onMousePress = function(widget, pos, button)
+  if button == 2 and configWindow then
+    configWindow:show()
+    configWindow:raise()
+    configWindow:focus()
+    return true
+  end
+  return false
+end
+
+local currentHotkeyKey = nil
+function reloadFlowerHotkey()
+  local key = storage.TadalaFlowerConfig.hotkey or "N"
+  if currentHotkeyKey == key then return end
+  currentHotkeyKey = key
+  hotkey(key, flowerHotkeyAction)
+end
+
+reloadFlowerHotkey()
+setDefaultTab("Tools")
+
+-- ============================================================
+-- TADALA FULL PLANTA - VISUAL COM SETUP E HOTKEY CONFIGURAVEL
+-- ============================================================
+
+-- ========================= CONFIGURACAO ==========================
+if not storage.FullPlantaConfig then
+  storage.FullPlantaConfig = {
+    enabled = false,
+    hotkey = "NumPad5",
+    plantItems = {
+      {id = 2644}, {id = 2983}, {id = 2984}, {id = 2981}, {id = 8763}
+    }
+  }
+end
+
+-- ========================= FUNCOES ==========================
+local function getPlantIds()
+  local ids = {}
+  for _, entry in pairs(storage.FullPlantaConfig.plantItems or {}) do
+    table.insert(ids, entry.id)
+  end
+  return ids
+end
+
+local function checkBackpacksForPlants()
+  local plants = {}
+  local plantIds = getPlantIds()
+  for _, container in pairs(g_game.getContainers()) do
+    for _, item in ipairs(container:getItems()) do
+      if table.find(plantIds, item:getId()) then
+        table.insert(plants, item)
+      end
+    end
+  end
+  return plants
+end
+
+local function throwPlant(targetPos)
+  local tile = g_map.getTile(targetPos)
+  if not tile then return end
+
+  local topThing = tile:getTopThing()
+  if topThing then
+    local blockIds = {
+      1387, 5023, 8592, 14443, 14444, 14445, 14446, 17083, 15146, 30822, 17299,
+      294, 369, 3135, 386, 293, 385, 518, 432, 5268,
+      430, 1368, 1386, 3678, 5543, 3043, 17394, 413, 434,
+      426, 2772, 425, 7716, 2773, 8259
+    }
+    if topThing:isItem() and table.find(blockIds, topThing:getId()) then
+      return
+    end
+  end
+
+  for _, thing in ipairs(tile:getThings()) do
+    if thing:isItem() and table.find(getPlantIds(), thing:getId()) then
+      return
+    end
+  end
+
+  local plants = checkBackpacksForPlants()
+  if #plants > 0 then
+    local plant = plants[1]
+    if plant:getCount() > 0 then
+      g_game.move(plant, targetPos, 1)
+    end
+  end
+end
+
+-- ========================= MACRO PRINCIPAL ==========================
+FullPlanta = macro(50, function()
+  if not g_game.isOnline() then return end
+  if FullPlanta:isOff() then return end
+
+  local playerPos = pos()
+  local positions = {
+    {x = playerPos.x, y = playerPos.y - 1, z = playerPos.z},
+    {x = playerPos.x, y = playerPos.y + 1, z = playerPos.z},
+    {x = playerPos.x - 1, y = playerPos.y, z = playerPos.z},
+    {x = playerPos.x + 1, y = playerPos.y, z = playerPos.z},
+    {x = playerPos.x + 1, y = playerPos.y - 1, z = playerPos.z},
+    {x = playerPos.x - 1, y = playerPos.y - 1, z = playerPos.z},
+    {x = playerPos.x + 1, y = playerPos.y + 1, z = playerPos.z},
+    {x = playerPos.x - 1, y = playerPos.y + 1, z = playerPos.z}
+  }
+
+  local plants = checkBackpacksForPlants()
+  if #plants == 0 then return end
+
+  for _, targetPos in ipairs(positions) do
+    throwPlant(targetPos)
+  end
+end)
+
+FullPlanta:setOff()
+
+-- ============================================================
+-- INTERFACE DE CONFIGURACAO
+-- ============================================================
+g_ui.loadUIFromString([[
+
+FullPlantaConfigWindow < MainWindow
+  text: Tadala Full Planta
+  size: 260 320
+
+  Label
+    id: lblTitle
+    text: Configuracao do Full Planta
+    anchors.top: parent.top
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-top: 10
+    text-align: center
+    color: #00BFFF
+
+  Label
+    id: lblHotkey
+    text: Hotkey de ativacao:
+    anchors.top: lblTitle.bottom
+    anchors.left: parent.left
+    margin-top: 15
+    margin-left: 10
+    height: 18
+
+  TextEdit
+    id: editHotkey
+    anchors.top: lblHotkey.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-left: 10
+    margin-right: 10
+    height: 20
+
+  Label
+    id: lblPlantas
+    text: Plantas:
+    anchors.top: editHotkey.bottom
+    anchors.left: parent.left
+    margin-top: 15
+    margin-left: 10
+    height: 18
+
+  BotContainer
+    id: PlantContainer
+    anchors.top: lblPlantas.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-left: 10
+    margin-right: 10
+    height: 80
+
+  Button
+    id: btnSave
+    text: Salvar
+    anchors.bottom: parent.bottom
+    anchors.left: parent.left
+    margin-left: 15
+    margin-bottom: 10
+    width: 80
+
+  Button
+    id: btnClose
+    text: Fechar
+    anchors.bottom: parent.bottom
+    anchors.right: parent.right
+    margin-right: 15
+    margin-bottom: 10
+    width: 80
+]])
+
+local configWindow
+local plantaHotkey = nil
+
+schedule(100, function()
+  local root = g_ui.getRootWidget()
+  if not root then return end
+
+  configWindow = UI.createWindow('FullPlantaConfigWindow', root)
+  configWindow:hide()
+
+  configWindow.editHotkey:setText(storage.FullPlantaConfig.hotkey or "NumPad5")
+
+  -- cria botcontainer de plantas
+  UI.Container(function()
+    local items = configWindow.PlantContainer:getItems() or {}
+    storage.FullPlantaConfig.plantItems = items
+  end, true, nil, configWindow.PlantContainer)
+
+  configWindow.PlantContainer:setItems(storage.FullPlantaConfig.plantItems or {})
+
+  configWindow.btnSave.onClick = function()
+    storage.FullPlantaConfig.hotkey = configWindow.editHotkey:getText()
+    local items = configWindow.PlantContainer:getItems() or {}
+    storage.FullPlantaConfig.plantItems = items
+    configWindow:hide()
+    reloadFullPlantaHotkey()
+  end
+
+  configWindow.btnClose.onClick = function()
+    configWindow:hide()
+  end
+end)
+
+-- ============================================================
+-- ICONE DE ATIVACAO
+-- ============================================================
+local fullIcon = addIcon("FullPlanta", {item = 8763, text = "ALL"}, function(icon, isOn)
+  storage.FullPlantaConfig.enabled = isOn
+  if isOn then
+    icon.text:setColor("#00FF00")
+    FullPlanta:setOn()
+  else
+    icon.text:setColor("#FFFFFF")
+    FullPlanta:setOff()
+  end
+end)
+
+local MOUSE_RIGHT_BUTTON = 2
+fullIcon.onMousePress = function(widget, pos, button)
+  if button == MOUSE_RIGHT_BUTTON then
+    if configWindow then
+      configWindow:show()
+      configWindow:raise()
+      configWindow:focus()
+    end
+    return true
+  end
+  return false
+end
+
+if storage.FullPlantaConfig.enabled then
+  FullPlanta:setOff()
+end
+
+-- ============================================================
+-- HOTKEY CONFIGURAVEL
+-- ============================================================
+local currentHotkeyKey = nil
+
+function reloadFullPlantaHotkey()
+  local key = storage.FullPlantaConfig.hotkey or "NumPad5"
+
+  -- evita recriar se for a mesma tecla
+  if currentHotkeyKey == key then
+    return
+  end
+
+  currentHotkeyKey = key
+
+  plantaHotkey = hotkey(key, function()
+    local newState = not storage.FullPlantaConfig.enabled
+    storage.FullPlantaConfig.enabled = newState
+
+    if fullIcon and fullIcon.setOn then
+      fullIcon:setOn(newState)
+    end
+
+    if newState then
+      FullPlanta:setOn()
+      fullIcon.text:setColor("#00FF00")
+    else
+      FullPlanta:setOff()
+      fullIcon.text:setColor("#FFFFFF")
+    end
+  end)
+
+end
+
+reloadFullPlantaHotkey()
+
+-- ===============================================================
+-- AUTO SPELL SAFE - ICON + SETUP LIMPO (SEM ACENTOS)
+-- ===============================================================
+
+if not storage.SafeSpellConfig then
+    storage.SafeSpellConfig = {
+      enabled = false,
+      spellToCast = "exevo gran mas flam",
+      secondarySpell = "exevo mas san",
+      runeId = "3155",
+      safePlayers = "Governador Tadala, Tadala One, Tadala Ms",
+      useSecondarySpell = true,
+      useSecondaryRune = false
+    }
+  end
+  
+  -- ========================= FUNCOES ==============================
+  local function isSafePlayer(name)
+    local list = {}
+    for s in string.gmatch(storage.SafeSpellConfig.safePlayers or "", "([^,]+)") do
+      local cleaned = s:lower():gsub("^%s+", ""):gsub("%s+$", "")
+      table.insert(list, cleaned)
+    end
+    for _, safeName in ipairs(list) do
+      if name:lower() == safeName then return true end
+    end
+    return false
+  end
+  
+  local function countMonstersAround(radius)
+    local count = 0
+    local pos = player:getPosition()
+    for dx = -radius, radius do
+      for dy = -radius, radius do
+        if math.abs(dx) + math.abs(dy) <= radius then
+          local tile = g_map.getTile({x = pos.x + dx, y = pos.y + dy, z = pos.z})
+          if tile then
+            for _, c in ipairs(tile:getCreatures() or {}) do
+              if c:isMonster() then count = count + 1 end
+            end
+          end
+        end
+      end
+    end
+    return count
+  end
+  
+  local function searchPlayersAround(radius)
+    local pos = player:getPosition()
+    for dz = -1, 1 do
+      for dx = -radius, radius do
+        for dy = -radius, radius do
+          if math.abs(dx) + math.abs(dy) <= radius then
+            local tile = g_map.getTile({x = pos.x + dx, y = pos.y + dy, z = pos.z + dz})
+            if tile then
+              for _, c in ipairs(tile:getCreatures() or {}) do
+                if c:isPlayer() and c:getName() ~= player:getName() and not isSafePlayer(c:getName()) then
+                  return true
+                end
+              end
+            end
+          end
+        end
+      end
+    end
+    return false
+  end
+  
+  -- ======================== MACRO PRINCIPAL =======================
+  local safeCastMacro = nil
+  
+  safeCastMacro = macro(250, function()
+    if not g_game.isOnline() then return end
+    if safeCastMacro:isOff() then return end
+  
+    local distance = 10
+    if countMonstersAround(distance) < 1 then return end
+  
+    local danger = searchPlayersAround(distance)
+    if danger then
+      if storage.SafeSpellConfig.useSecondarySpell and storage.SafeSpellConfig.secondarySpell ~= "" then
+        say(storage.SafeSpellConfig.secondarySpell)
+      elseif storage.SafeSpellConfig.useSecondaryRune then
+        local t = g_game.getAttackingCreature()
+        if t then useWith(tonumber(storage.SafeSpellConfig.runeId), t) end
+      end
+    else
+      if storage.SafeSpellConfig.spellToCast and storage.SafeSpellConfig.spellToCast ~= "" then
+        say(storage.SafeSpellConfig.spellToCast)
+      end
+    end
+  end)
+  safeCastMacro:setOff()
+  
+-- ===================== INTERFACE DE SETUP =======================
+-- ===================== INTERFACE DE SETUP =======================
+g_ui.loadUIFromString([[
+SafeSpellConfigWindow < MainWindow
+  text: Tadala Spell Safe
+  size: 260 360
+
+  Label
+    id: lblTitle
+    text: Configuracao Auto Spell Safe
+    anchors.top: parent.top
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-top: 10
+    text-align: center
+    color: #00BFFF
+
+  Label
+    id: lblUePrincipal
+    text: UE Principal:
+    anchors.top: lblTitle.bottom
+    anchors.left: parent.left
+    margin-top: 10
+    margin-left: 10
+
+  TextEdit
+    id: editUePrincipal
+    anchors.top: lblUePrincipal.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-left: 10
+    margin-right: 10
+    height: 20
+
+  Label
+    id: lblUeSecundaria
+    text: UE Secundaria:
+    anchors.top: editUePrincipal.bottom
+    anchors.left: parent.left
+    margin-top: 10
+    margin-left: 10
+
+  TextEdit
+    id: editUeSecundaria
+    anchors.top: lblUeSecundaria.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-left: 10
+    margin-right: 10
+    height: 20
+
+  Label
+    id: lblRuneId
+    text: ID da Runa:
+    anchors.top: editUeSecundaria.bottom
+    anchors.left: parent.left
+    margin-top: 10
+    margin-left: 10
+
+  TextEdit
+    id: editRuneId
+    anchors.top: lblRuneId.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-left: 10
+    margin-right: 10
+    height: 20
+
+  Label
+    id: lblSafePlayers
+    text: Safe Players:
+    anchors.top: editRuneId.bottom
+    anchors.left: parent.left
+    margin-top: 10
+    margin-left: 10
+
+  TextEdit
+    id: editSafePlayers
+    anchors.top: lblSafePlayers.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-left: 10
+    margin-right: 10
+    height: 20
+
+  Button
+    id: btnSpell
+    text: UE Secundaria
+    anchors.top: editSafePlayers.bottom
+    anchors.left: parent.left
+    margin-top: 15
+    margin-left: 15
+    width: 110
+
+  Button
+    id: btnRune
+    text: Runa
+    anchors.top: editSafePlayers.bottom
+    anchors.right: parent.right
+    margin-top: 15
+    margin-right: 15
+    width: 80
+
+  Button
+    id: btnSave
+    text: Salvar
+    anchors.bottom: parent.bottom
+    anchors.left: parent.left
+    margin-left: 15
+    margin-bottom: 10
+    width: 60
+
+  Button
+    id: btnClose
+    text: Fechar
+    anchors.bottom: parent.bottom
+    anchors.right: parent.right
+    margin-right: 15
+    margin-bottom: 10
+    width: 60
+</SafeSpellConfigWindow>
+]])
+
+  
+  local configWindow = nil
+  
+  schedule(100, function()
+    local root = g_ui.getRootWidget()
+    if not root then return end
+  
+    configWindow = UI.createWindow('SafeSpellConfigWindow', root)
+    configWindow:hide()
+  
+    -- preencher campos
+    configWindow.editUePrincipal:setText(storage.SafeSpellConfig.spellToCast)
+    configWindow.editUeSecundaria:setText(storage.SafeSpellConfig.secondarySpell)
+    configWindow.editRuneId:setText(storage.SafeSpellConfig.runeId)
+    configWindow.editSafePlayers:setText(storage.SafeSpellConfig.safePlayers)
+  
+    -- alternancia visual dos botoes
+    local function updateButtons()
+      if storage.SafeSpellConfig.useSecondarySpell then
+        configWindow.btnSpell:setColor("#00FF00")
+        configWindow.btnRune:setColor("#FFFFFF")
+      else
+        configWindow.btnSpell:setColor("#FFFFFF")
+        configWindow.btnRune:setColor("#00FF00")
+      end
+    end
+  
+    configWindow.btnSpell.onClick = function()
+      storage.SafeSpellConfig.useSecondarySpell = true
+      storage.SafeSpellConfig.useSecondaryRune = false
+      updateButtons()
+    end
+  
+    configWindow.btnRune.onClick = function()
+      storage.SafeSpellConfig.useSecondarySpell = false
+      storage.SafeSpellConfig.useSecondaryRune = true
+      updateButtons()
+    end
+  
+    configWindow.btnSave.onClick = function()
+      storage.SafeSpellConfig.spellToCast = configWindow.editUePrincipal:getText()
+      storage.SafeSpellConfig.secondarySpell = configWindow.editUeSecundaria:getText()
+      storage.SafeSpellConfig.runeId = configWindow.editRuneId:getText()
+      storage.SafeSpellConfig.safePlayers = configWindow.editSafePlayers:getText()
+      updateButtons()
+      configWindow:hide()
+    end
+  
+    configWindow.btnClose.onClick = function()
+      configWindow:hide()
+    end
+  
+    updateButtons()
+  end)
+  
+  -- ========================= ICONE ================================
+  spellIcon = addIcon("SafeSpell", {item = 3074, text = "UE-Safe"}, function(icon, isOn)
+    storage.SafeSpellConfig.enabled = isOn
+  
+    -- muda cor do texto conforme estado
+    if isOn then
+      icon.text:setColor('#00FF00') -- verde quando ligado
+    else
+      icon.text:setColor('#FFFFFF') -- branco quando desligado
+    end
+  
+    -- liga ou desliga o macro
+    if safeCastMacro then
+      if isOn then
+        safeCastMacro:setOn()
+      else
+        safeCastMacro:setOff()
+      end
+    end
+  end)
+  
+  
+  local MOUSE_RIGHT_BUTTON = 2
+  spellIcon.onMousePress = function(widget, pos, button)
+    if button == MOUSE_RIGHT_BUTTON then
+      if configWindow then
+        configWindow:show()
+        configWindow:raise()
+        configWindow:focus()
+      end
+      return true
+    end
+    return false
+  end
+  
+  if storage.SafeSpellConfig.enabled then
+    safeCastMacro:setOn()
+  end
+  
+  setDefaultTab("War")
+
+-- ============================================================
+-- TADALA ANTIPUSH - FULL COM SETUP E HOTKEY CONFIGURÁVEL
+-- ============================================================
+
+if not storage.AntiPushConfig then
+  storage.AntiPushConfig = {
+    hotkey = "NumPad0",
+    enabled = false,
+    dropCount = 2, -- novo: controla quantos itens dropa
+    items = {3031, 3035, 0, 0, 0}
+  }
+end
+
+local worldAllowed = worldAllowed or nil
+local panelName = "AntiPushPanel"
+
+-- ============================================================
+-- FUNÇÕES AUXILIARES
+-- ============================================================
+local function hasField(tile)
+  local fieldIds = {
+    1487,1488,1489,1490,1491,1492,1493,1494,
+    1500,1501,1502,11095,2118,2120,2122,2126,
+    429,430,431,2121,2123
+  }
+  for _, thing in ipairs(tile:getThings()) do
+    if table.contains(fieldIds, thing:getId()) then
+      return true
+    end
+  end
+  return false
+end
+
+local function getVisibleItems(tile)
+  local visible = {}
+  if not hasField(tile) then
+    for _, thing in ipairs(tile:getThings()) do
+      if thing:isStackable() then
+        table.insert(visible, thing:getId())
+      end
+    end
+  else
+    local topThing = tile:getTopThing()
+    if topThing and topThing:isStackable() then
+      table.insert(visible, topThing:getId())
+    end
+  end
+  return visible
+end
+
+-- ============================================================
+-- MACRO PRINCIPAL
+-- ============================================================
+AntiPushMacro = macro(100, "", function()
+  if worldAllowed and g_game.getWorldName() ~= worldAllowed then return end
+  if not storage.AntiPushConfig.enabled then return end
+
+  local tile = g_map.getTile(player:getPosition())
+  if not tile then return end
+
+  local topThing = tile:getTopThing()
+  local topId = topThing and topThing:getId() or 0
+
+  local candidates = {}
+  for _, itemId in ipairs(storage.AntiPushConfig.items) do
+    if itemId and itemId >= 100 then
+      table.insert(candidates, itemId)
+    end
+  end
+
+  if storage.AntiPushConfig.cycleDone then
+    local visibleItems = getVisibleItems(tile)
+    local found = false
+    for _, itemId in ipairs(candidates) do
+      if table.contains(visibleItems, itemId) then
+        found = true
+        break
+      end
+    end
+    if not found then
+      storage.AntiPushConfig.cycleDone = false
+      storage.AntiPushConfig.lastItem = 1
+    end
+    return
+  end
+
+  if type(storage.AntiPushConfig.lastItem) ~= 'number' or storage.AntiPushConfig.lastItem > #candidates then
+    storage.AntiPushConfig.cycleDone = true
+    return
+  end
+
+  local currentItemId = candidates[storage.AntiPushConfig.lastItem]
+  if currentItemId == topId then
+    storage.AntiPushConfig.lastItem = storage.AntiPushConfig.lastItem + 1
+    return
+  end
+
+  local item = findItem(currentItemId)
+  if item and item:getCount() >= 1 then
+    local dropCount = math.max(1, math.min(storage.AntiPushConfig.dropCount or 2, 2))
+    g_game.move(item, player:getPosition(), dropCount)
+  end
+
+  storage.AntiPushConfig.lastItem = storage.AntiPushConfig.lastItem + 1
+end)
+
+AntiPushMacro:setOff()
+
+-- ============================================================
+-- INTERFACE DO SETUP
+-- ============================================================
+g_ui.loadUIFromString([[
+TadalaAntiPushWindow < MainWindow
+  text: Tadala AntiPush
+  size: 260 310
+
+  Label
+    id: lblTitle
+    text: AntiPush Setup
+    anchors.top: parent.top
+    anchors.left: parent.left
+    anchors.right: parent.right
+    text-align: center
+    color: #00BFFF
+    margin-top: 10
+
+  Label
+    id: lblHotkey
+    text: Hotkey de ativacao:
+    anchors.top: lblTitle.bottom
+    anchors.left: parent.left
+    margin-left: 10
+    margin-top: 10
+
+  TextEdit
+    id: editHotkey
+    anchors.top: lblHotkey.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-left: 10
+    margin-right: 10
+    height: 20
+    text-align: center
+
+  Label
+    id: lblDrop
+    text: Itens por drop (1-2):
+    anchors.top: editHotkey.bottom
+    anchors.left: parent.left
+    margin-top: 15
+    margin-left: 10
+
+  HorizontalScrollBar
+    id: dropBar
+    anchors.top: lblDrop.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-left: 10
+    margin-right: 10
+    minimum: 1
+    maximum: 2
+    step: 1
+    height: 15
+
+  Label
+    id: lblDropValue
+    text: 2
+    anchors.top: dropBar.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    text-align: center
+    color: #AAAAAA
+    margin-top: 5
+
+  Label
+    id: lblItens
+    text: Itens AntiPush:
+    anchors.top: lblDropValue.bottom
+    anchors.left: parent.left
+    margin-top: 15
+    margin-left: 10
+
+  BotContainer
+    id: AntiPushContainer
+    anchors.top: lblItens.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-left: 10
+    margin-right: 10
+    height: 50
+
+  Button
+    id: btnSave
+    text: Salvar
+    anchors.bottom: parent.bottom
+    anchors.left: parent.left
+    margin-left: 15
+    margin-bottom: 10
+    width: 80
+
+  Button
+    id: btnClose
+    text: Fechar
+    anchors.bottom: parent.bottom
+    anchors.right: parent.right
+    margin-right: 15
+    margin-bottom: 10
+    width: 80
+]])
+
+local configWindow
+local antiPushIcon
+
+schedule(100, function()
+  local root = g_ui.getRootWidget()
+  if not root then return end
+
+  configWindow = UI.createWindow('TadalaAntiPushWindow', root)
+  configWindow:hide()
+
+  configWindow.editHotkey:setText(storage.AntiPushConfig.hotkey or "NumPad0")
+
+  configWindow.dropBar:setValue(storage.AntiPushConfig.dropCount or 2)
+  configWindow.lblDropValue:setText((storage.AntiPushConfig.dropCount or 2) .. " itens")
+
+  configWindow.dropBar.onValueChange = function(widget, value)
+    storage.AntiPushConfig.dropCount = value
+    configWindow.lblDropValue:setText(value .. " itens")
+  end
+
+  -- itens no container
+  UI.Container(function()
+    local items = configWindow.AntiPushContainer:getItems() or {}
+    storage.AntiPushConfig.items = {}
+    for _, it in ipairs(items) do
+      table.insert(storage.AntiPushConfig.items, it.id)
+    end
+  end, true, nil, configWindow.AntiPushContainer)
+
+  local initial = {}
+  for _, id in ipairs(storage.AntiPushConfig.items or {}) do
+    table.insert(initial, {id = id, count = 1})
+  end
+  configWindow.AntiPushContainer:setItems(initial)
+
+  configWindow.btnSave.onClick = function()
+    storage.AntiPushConfig.hotkey = configWindow.editHotkey:getText()
+    local items = configWindow.AntiPushContainer:getItems() or {}
+    storage.AntiPushConfig.items = {}
+    for _, it in ipairs(items) do
+      table.insert(storage.AntiPushConfig.items, it.id)
+    end
+    configWindow:hide()
+    reloadAntiPushHotkey()
+  end
+
+  configWindow.btnClose.onClick = function()
+    configWindow:hide()
+  end
+end)
+
+-- ============================================================
+-- ICONE + HOTKEY
+-- ============================================================
+antiPushIcon = addIcon("AntiPush", {item = 3031, text = "ANTP"}, function(icon, isOn)
+  storage.AntiPushConfig.enabled = isOn
+  if isOn then
+    icon.text:setColor('#00FF00')
+    AntiPushMacro:setOn()
+  else
+    icon.text:setColor('#FFFFFF')
+    AntiPushMacro:setOff()
+  end
+end)
+
+antiPushIcon.onMousePress = function(widget, pos, button)
+  if button == 2 and configWindow then
+    configWindow:show()
+    configWindow:raise()
+    configWindow:focus()
+    return true
+  end
+  return false
+end
+
+-- ============================================================
+-- HOTKEY CONFIGURÁVEL
+-- ============================================================
+local currentHotkeyKey = nil
+function reloadAntiPushHotkey()
+  local key = storage.AntiPushConfig.hotkey or "NumPad0"
+  if currentHotkeyKey == key then return end
+  currentHotkeyKey = key
+  hotkey(key, function()
+    local state = not storage.AntiPushConfig.enabled
+    storage.AntiPushConfig.enabled = state
+    antiPushIcon:setOn(state)
+    if state then
+      AntiPushMacro:setOn()
+    else
+      AntiPushMacro:setOff()
+    end
+  end)
+end
+
+reloadAntiPushHotkey()
+
+setDefaultTab("Tools")
+
+setDefaultTab("Tools")
+
+-- ============================================================
+-- TADALA BUGMAP - FULL SETUP ESTILO SAFESPELL
+-- ============================================================
+
+if not storage.BugMapConfig then
+  storage.BugMapConfig = {
+    mode = "wasd", -- "wasd", "arrows" ou "numpad"
+    enabled = true
+  }
+end
+
+-- ============================================================
+-- FUNÇÃO PRINCIPAL (usa o tile alvo, bug real)
+-- ============================================================
+local function checkPos(dx, dy)
+  local player = g_game.getLocalPlayer()
+  if not player then return end
+
+  local playerPos = player:getPosition()
+  if not playerPos then return end
+
+  local targetPos = {x = playerPos.x + dx, y = playerPos.y + dy, z = playerPos.z}
+  local tile = g_map.getTile(targetPos)
+  if tile then
+    local topThing = tile:getTopUseThing()
+    if topThing then
+      g_game.use(topThing)
+    end
+  end
+end
+
+-- ============================================================
+-- MACRO PRINCIPAL
+-- ============================================================
+local BugMap = macro(1, "BugMap", function()
+  if not storage.BugMapConfig.enabled then return end
+
+  local kb = modules.corelib.g_keyboard
+  local mode = storage.BugMapConfig.mode
+
+  -- === WASD ===
+  if mode == "wasd" then
+    if kb.isKeyPressed('w') then checkPos(0, -5)
+    elseif kb.isKeyPressed('e') then checkPos(3, -3)
+    elseif kb.isKeyPressed('d') then checkPos(5, 0)
+    elseif kb.isKeyPressed('c') then checkPos(3, 3)
+    elseif kb.isKeyPressed('s') then checkPos(0, 5)
+    elseif kb.isKeyPressed('z') then checkPos(-3, 3)
+    elseif kb.isKeyPressed('a') then checkPos(-5, 0)
+    elseif kb.isKeyPressed('q') then checkPos(-3, -3)
+    end
+
+  -- === SETAS ===
+  elseif mode == "arrows" then
+    if kb.isKeyPressed('up') then checkPos(0, -5)
+    elseif kb.isKeyPressed('right') then checkPos(5, 0)
+    elseif kb.isKeyPressed('down') then checkPos(0, 5)
+    elseif kb.isKeyPressed('left') then checkPos(-5, 0)
+    end
+
+  -- === NUMPAD ===
+  elseif mode == "numpad" then
+    if kb.isKeyPressed('numpad8') then checkPos(0, -5)
+    elseif kb.isKeyPressed('numpad9') then checkPos(3, -3)
+    elseif kb.isKeyPressed('numpad6') then checkPos(5, 0)
+    elseif kb.isKeyPressed('numpad3') then checkPos(3, 3)
+    elseif kb.isKeyPressed('numpad2') then checkPos(0, 5)
+    elseif kb.isKeyPressed('numpad1') then checkPos(-3, 3)
+    elseif kb.isKeyPressed('numpad4') then checkPos(-5, 0)
+    elseif kb.isKeyPressed('numpad7') then checkPos(-3, -3)
+    end
+  end
+end)
+
+-- ============================================================
+-- INTERFACE VISUAL (SAFE SPELL STYLE)
+-- ============================================================
+g_ui.loadUIFromString([[
+TadalaBugMapWindow < MainWindow
+  text: Tadala BugMap
+  size: 260 220
+
+  Label
+    id: lblTitle
+    text: Modo de Controle do BugMap
+    anchors.top: parent.top
+    anchors.left: parent.left
+    anchors.right: parent.right
+    text-align: center
+    color: #00BFFF
+    margin-top: 10
+
+  Label
+    id: lblDesc
+    anchors.top: lblTitle.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    text-align: center
+    margin-top: 10
+    color: #CCCCCC
+
+  Button
+    id: btnWASD
+    text: WASD
+    anchors.top: lblDesc.bottom
+    anchors.left: parent.left
+    margin-top: 20
+    margin-left: 20
+    width: 70
+    height: 35
+
+  Button
+    id: btnArrows
+    text: Setas
+    anchors.top: lblDesc.bottom
+    anchors.horizontalCenter: parent.horizontalCenter
+    margin-top: 20
+    width: 70
+    height: 35
+
+  Button
+    id: btnNumPad
+    text: NumPad
+    anchors.top: lblDesc.bottom
+    anchors.right: parent.right
+    margin-right: 20
+    margin-top: 20
+    width: 70
+    height: 35
+
+  Button
+    id: btnSave
+    text: Salvar
+    anchors.bottom: parent.bottom
+    anchors.left: parent.left
+    margin-left: 20
+    margin-bottom: 10
+    width: 80
+
+  Button
+    id: btnClose
+    text: Fechar
+    anchors.bottom: parent.bottom
+    anchors.right: parent.right
+    margin-right: 20
+    margin-bottom: 10
+    width: 80
+]])
+
+local configWindow
+local bugMapIcon
+
+schedule(100, function()
+  local root = g_ui.getRootWidget()
+  if not root then return end
+
+  configWindow = UI.createWindow('TadalaBugMapWindow', root)
+  configWindow:hide()
+
+  -- alternância visual
+  local function updateButtons()
+    local mode = storage.BugMapConfig.mode
+    configWindow.btnWASD:setColor(mode == "wasd" and "#00FF00" or "#FFFFFF")
+    configWindow.btnArrows:setColor(mode == "arrows" and "#00FF00" or "#FFFFFF")
+    configWindow.btnNumPad:setColor(mode == "numpad" and "#00FF00" or "#FFFFFF")
+
+    if bugMapIcon then
+      local label = (mode == "wasd" and "[W]") or (mode == "arrows" and "[S]") or "[N]"
+      bugMapIcon.text:setText("BUG " .. label)
+    end
+  end
+
+  configWindow.btnWASD.onClick = function()
+    storage.BugMapConfig.mode = "wasd"
+    updateButtons()
+  end
+
+  configWindow.btnArrows.onClick = function()
+    storage.BugMapConfig.mode = "arrows"
+    updateButtons()
+  end
+
+  configWindow.btnNumPad.onClick = function()
+    storage.BugMapConfig.mode = "numpad"
+    updateButtons()
+  end
+
+  configWindow.btnSave.onClick = function()
+    updateButtons()
+    configWindow:hide()
+  end
+
+  configWindow.btnClose.onClick = function()
+    configWindow:hide()
+  end
+
+  updateButtons()
+end)
+
+-- ============================================================
+-- ÍCONE DE ATIVAÇÃO (SEM HOTKEY)
+-- ============================================================
+bugMapIcon = addIcon("BugMap", {item = 3079, text = "BUG [W]"}, function(icon, isOn)
+  storage.BugMapConfig.enabled = isOn
+  if isOn then
+    icon.text:setColor('#00FF00')
+    BugMap:setOn()
+  else
+    icon.text:setColor('#FFFFFF')
+    BugMap:setOff()
+  end
+end)
+
+local MOUSE_RIGHT_BUTTON = 2
+bugMapIcon.onMousePress = function(widget, pos, button)
+  if button == MOUSE_RIGHT_BUTTON and configWindow then
+    configWindow:show()
+    configWindow:raise()
+    configWindow:focus()
+    return true
+  end
+  return false
+end
+
+setDefaultTab("War")
+
+-- ============================================================
+-- ⚗️ TADALA POTION - DEBUG VERSION (MESMA LÓGICA ORIGINAL)
+-- ============================================================
+
+if type(storage.tadalaPotion) ~= "table" then
+  storage.tadalaPotion = {
+    on = false,
+    title = "MP%",
+    min = 0,
+    max = 100,
+    item = 23373,
+    checkMode = "mp",
+    autoMoveToTarget = false,
+    guildName = "Farmacia Do Tiao"
+  }
+end
+
+-- 🔁 Variáveis Gerais
+local timeout = 5
+local activeTargets = {}
+local lastMessageTime = 0
+local maxDistance = 1
+
+-- Função auxiliar
+local function isAdjacent(playerPos, targetPos)
+  local dx = math.abs(playerPos.x - targetPos.x)
+  local dy = math.abs(playerPos.y - targetPos.y)
+  return (dx <= maxDistance and dy <= maxDistance)
+end
+
+-- Escuta mensagens de "p"
+onTalk(function(name, level, mode, text, channelId, pos)
+  if text == "p" or text == "(p)" then
+    activeTargets[name] = os.time() + timeout
+  end
+end)
+
+-- ============================================================
+-- MACRO PRINCIPAL
+-- ============================================================
+local tadalaMacro = macro(500, "", function()
+  if not storage.tadalaPotion.on then return end
+
+  local player = g_game.getLocalPlayer()
+  if not player then
+    return
+  end
+
+  local maxValue, currentValue
+  if storage.tadalaPotion.checkMode == "mp" then
+    maxValue = player:getMaxMana()
+    currentValue = player:getMana()
+  else
+    maxValue = player:getMaxHealth()
+    currentValue = player:getHealth()
+  end
+
+  if not maxValue or maxValue <= 0 then
+    return
+  end
+
+  local percent = (currentValue / maxValue) * 100
+  
+
+  -- ✉️ Solicita potion no canal
+  if percent < storage.tadalaPotion.max then
+    local currentTime = os.time()
+    if lastMessageTime == 0 or currentTime - lastMessageTime >= 5 then
+      local guildChannel = getChannelId(storage.tadalaPotion.guildName)
+
+      if guildChannel then
+        sayChannel(guildChannel, "p")
+      else
+        local channels = getChannels()
+        if channels then
+          for id, ch in pairs(channels) do
+            print(string.format("   - [%d] %s", id, ch.name))
+          end
+        else
+        end
+      end
+      lastMessageTime = currentTime
+    end
+  else
+    lastMessageTime = 0
+  end
+
+  -- 🎯 Aplica potion nos alvos ativos
+  local playerPos = player:getPosition()
+  local currentTime = os.time()
+  local expiredTargets = {}
+
+  for name, endTime in pairs(activeTargets) do
+    if currentTime >= endTime then
+      table.insert(expiredTargets, name)
+    else
+      local target = getCreatureByName(name)
+      if target and target:isPlayer() then
+        local targetPos = target:getPosition()
+        local distance = getDistanceBetween(playerPos, targetPos)
+
+
+        if distance <= 1 then
+          useWith(storage.tadalaPotion.item, target)
+        elseif storage.tadalaPotion.autoMoveToTarget and distance <= 3 then
+          autoWalk(targetPos, 1, {ignoreNonPathable=true, precision=1})
+        end
+      else
+      end
+    end
+  end
+
+  for _, name in ipairs(expiredTargets) do
+    activeTargets[name] = nil
+  end
+end)
+
+tadalaMacro.setOn(storage.tadalaPotion.on)
+
+-- ============================================================
+-- INTERFACE SETUP (SAFE SPELL STYLE)
+-- ============================================================
+g_ui.loadUIFromString([[
+TadalaPotionSetup < MainWindow
+  text: Tadala Potion Setup
+  size: 270 330
+
+  Label
+    id: lblTitle
+    text: Configuracao do Tadala Potion
+    anchors.top: parent.top
+    anchors.left: parent.left
+    anchors.right: parent.right
+    text-align: center
+    margin-top: 10
+    color: #00BFFF
+
+  Label
+    id: lblItem
+    text: Item da Potion:
+    anchors.top: lblTitle.bottom
+    anchors.left: parent.left
+    margin-left: 75
+    margin-top: 15
+
+  BotItem
+    id: potionItem
+    anchors.top: lblItem.bottom
+    anchors.left: parent.left
+    margin-left: 100
+    width: 35
+    height: 35
+
+  Label
+    id: lblPercent
+    text: Percentual de HP/MP:
+    anchors.top: potionItem.bottom
+    anchors.left: parent.left
+    margin-left: 10
+    margin-top: 10
+
+  HorizontalScrollBar
+    id: sliderPercent
+    anchors.top: lblPercent.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-left: 10
+    margin-right: 10
+    minimum: 1
+    maximum: 100
+    step: 1
+    height: 15
+
+  Label
+    id: lblPercentValue
+    text: 100%
+    anchors.top: sliderPercent.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-top: 5
+    text-align: center
+    color: #AAAAAA
+
+  Label
+    id: lblMode
+    text: Modo de Checagem:
+    anchors.top: lblPercentValue.bottom
+    anchors.left: parent.left
+    margin-left: 65
+    margin-top: 15
+
+  Button
+    id: btnMP
+    text: MP
+    anchors.top: lblMode.bottom
+    anchors.left: parent.left
+    margin-top: 5
+    margin-left: 40
+    width: 60
+
+  Button
+    id: btnHP
+    text: HP
+    anchors.top: lblMode.bottom
+    anchors.right: parent.right
+    margin-top: 5
+    margin-right: 40
+    width: 60
+
+  Label
+    id: lblGuild
+    text: Nome da Guild:
+    anchors.top: btnMP.bottom
+    anchors.left: parent.left
+    margin-left: 75
+    margin-top: 15
+
+  TextEdit
+    id: editGuild
+    anchors.top: lblGuild.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-left: 10
+    margin-right: 10
+    height: 22
+
+  Button
+    id: btnSave
+    text: Salvar
+    anchors.bottom: parent.bottom
+    anchors.left: parent.left
+    margin-left: 15
+    margin-bottom: 10
+    width: 80
+
+  Button
+    id: btnClose
+    text: Fechar
+    anchors.bottom: parent.bottom
+    anchors.right: parent.right
+    margin-right: 15
+    margin-bottom: 10
+    width: 80
+]])
+
+local configWindow
+local potionIcon
+
+schedule(200, function()
+  local root = g_ui.getRootWidget()
+  if not root then return end
+
+  configWindow = UI.createWindow('TadalaPotionSetup', root)
+  configWindow:hide()
+
+  -- preencher campos
+  configWindow.potionItem:setItemId(storage.tadalaPotion.item)
+  configWindow.sliderPercent:setValue(storage.tadalaPotion.max)
+  configWindow.lblPercentValue:setText(storage.tadalaPotion.max .. "%")
+  configWindow.editGuild:setText(storage.tadalaPotion.guildName)
+
+  local function updateButtons()
+    if storage.tadalaPotion.checkMode == "mp" then
+      configWindow.btnMP:setColor("#00FF00")
+      configWindow.btnHP:setColor("#FFFFFF")
+    else
+      configWindow.btnMP:setColor("#FFFFFF")
+      configWindow.btnHP:setColor("#00FF00")
+    end
+  end
+
+  configWindow.btnMP.onClick = function()
+    storage.tadalaPotion.checkMode = "mp"
+    updateButtons()
+  end
+
+  configWindow.btnHP.onClick = function()
+    storage.tadalaPotion.checkMode = "hp"
+    updateButtons()
+  end
+
+  configWindow.sliderPercent.onValueChange = function(widget, value)
+    storage.tadalaPotion.max = value
+    configWindow.lblPercentValue:setText(value .. "%")
+  end
+
+  configWindow.potionItem.onItemChange = function(widget)
+    storage.tadalaPotion.item = widget:getItemId()
+  end
+
+  configWindow.btnSave.onClick = function()
+    storage.tadalaPotion.guildName = configWindow.editGuild:getText()
+    updateButtons()
+    configWindow:hide()
+  end
+
+  configWindow.btnClose.onClick = function()
+    configWindow:hide()
+  end
+
+  updateButtons()
+end)
+
+-- ============================================================
+-- ÍCONE DE ATIVAÇÃO
+-- ============================================================
+potionIcon = addIcon("TadalaPotion", {item = 23373, text = "G-Potion"}, function(icon, isOn)
+  storage.tadalaPotion.on = isOn
+  if isOn then
+    icon.text:setColor('#00FF00')
+    tadalaMacro.setOn(true) -- ✅
+  else
+    icon.text:setColor('#FFFFFF')
+    tadalaMacro.setOn(false) -- ✅
+  end
+end)
+
+local MOUSE_RIGHT_BUTTON = 2
+potionIcon.onMousePress = function(widget, pos, button)
+  if button == MOUSE_RIGHT_BUTTON and configWindow then
+    configWindow:show()
+    configWindow:raise()
+    configWindow:focus()
+    return true
+  end
+  return false
+end
+
+-- ============================================================
+-- ⚔️ TADALA COMBO SYSTEM - SETUP FINAL
+-- ============================================================
+
+if type(storage.comboSystem) ~= "table" then
+  storage.comboSystem = {
+    enabled = false,
+    guildName = "Farmacia Do Tiao",
+    comboLeaderNames = "Governador Tadala, Tadala Script",
+    leaderEnabled = true,
+    outfitEnabled = true,
+    attackEnabled = true
+  }
+end
+
+-- delay fixo (mesmo do seu original)
+local CALL_DELAY = 10
+
+-- ============================================================
+-- LÓGICA ORIGINAL (sem alterações)
+-- ============================================================
+if not oldDoCreatureFitFilters then
+  oldDoCreatureFitFilters = modules.game_battle.doCreatureFitFilters
+end
+
+modules.game_battle.doCreatureFitFilters = function(creature)
+  if config and config.enabled and creature:isPlayer() and table.find(emblemasParaOcultar, creature:getEmblem()) then
+    return false
+  end
+  return oldDoCreatureFitFilters(creature)
+end
+
+if not getRealName then
+  function getRealName(creature)
+    if not creature or not creature.getName then
+      return ""
+    end
+    return creature:getName():gsub("%s%(%d+%)", "")
+  end
+end
+
+local leaderOutfit = { head = 0, body = 94, legs = 79, feet = 79, type = 12, addons = 3 }
+local targetOutfit = { head = 0, body = 0, legs = 0, feet = 0, type = 280 }
+local allyOutfit   = { head = 79, body = 94, legs = 94, feet = 94, type = 133 }
+local enemyOutfit  = { head = 114, body = 114, legs = 114, feet = 114, type = 128 }
+
+local comboTargetName
+local lastTargetName = ""
+local lastFocusTime = 0
+
+local function outfitEquals(o1, o2)
+  return o1.type == o2.type and o1.head == o2.head and o1.body == o2.body
+     and o1.legs == o2.legs and o1.feet == o2.feet and o1.addons == o2.addons
+end
+
+local function isLeader(name)
+  for leader in string.gmatch(storage.comboSystem.comboLeaderNames or "", '([^,]+)') do
+    local trimmed = leader:gsub("^%s+", ""):gsub("%s+$", "")
+    if name:lower() == trimmed:lower() then
+      return true
+    end
+  end
+  return false
+end
+
+-- ============================================================
+-- MACROS (mantidos originais)
+-- ============================================================
+
+local comboLeader = macro(100, "", function()
+  if not storage.comboSystem.outfitEnabled then return end
+
+  local dimension = modules.game_interface.getMapPanel():getVisibleDimension()
+  local spectators = g_map.getSpectatorsInRangeEx(player:getPosition(), false,
+    math.floor(dimension.width / 2), math.floor(dimension.width / 2),
+    math.floor(dimension.height / 2), math.floor(dimension.height / 2))
+
+  for _, creature in ipairs(spectators) do
+    if creature:getId() ~= player:getId() then
+      local cname = getRealName(creature):lower()
+      if isLeader(cname) then
+        if not outfitEquals(creature:getOutfit(), leaderOutfit) then
+          creature:setOutfit(leaderOutfit)
+        end
+      elseif comboTargetName and cname == comboTargetName:lower() then
+        if not outfitEquals(creature:getOutfit(), targetOutfit) then
+          creature:setOutfit(targetOutfit)
+        end
+      elseif creature:getEmblem() == 1 then
+        if not outfitEquals(creature:getOutfit(), allyOutfit) then
+          creature:setOutfit(allyOutfit)
+        end
+      elseif creature:getEmblem() == 2 then
+        if not outfitEquals(creature:getOutfit(), enemyOutfit) then
+          creature:setOutfit(enemyOutfit)
+        end
+      end
+    end
+  end
+end)
+
+local leaderCall = macro(500, "", function()
+  if not storage.comboSystem.leaderEnabled then return end
+
+  local target = g_game.getAttackingCreature()
+  if not target then return end
+
+  local targetName = getRealName(target)
+  local guildChannel = getChannelId(storage.comboSystem.guildName)
+  if not guildChannel then return end
+
+  local now = os.time()
+  if targetName ~= lastTargetName then
+    sayChannel(guildChannel, "." .. targetName)
+    lastTargetName = targetName
+    lastFocusTime = now
+    return
+  end
+
+  if lastFocusTime == 0 or (now - lastFocusTime) >= CALL_DELAY then
+    sayChannel(guildChannel, "." .. targetName)
+    lastFocusTime = now
+  end
+end)
+
+onTalk(function(name, level, mode, text, channelId, pos)
+  if string.sub(text, 1, 1) == "." then
+    comboTargetName = string.sub(text, 2)
+  end
+end)
+
+local attackLeaderTarget = macro(500, "", function()
+  if not storage.comboSystem.attackEnabled then return end
+  if g_game.getFollowingCreature() then return end
+  if not comboTargetName or comboTargetName == "" then return end
+
+  local target = getCreatureByName(comboTargetName)
+  if not target then return end
+
+  local attacking = g_game.getAttackingCreature()
+  if not attacking or attacking:getId() ~= target:getId() then
+    attack(target)
+  end
+end)
+
+onKeyPress(function(keys)
+  if keys == "Escape" then
+    comboTargetName = ''
+  end
+end)
+
+-- ============================================================
+-- 🧩 SETUP WINDOW
+-- ============================================================
+g_ui.loadUIFromString([[
+TadalaComboSetup < MainWindow
+  text: Tadala Combo Setup
+  size: 270 320
+
+  Label
+    id: lblTitle
+    text: Configuracao do Combo System
+    anchors.top: parent.top
+    anchors.left: parent.left
+    anchors.right: parent.right
+    text-align: center
+    color: #00BFFF
+    margin-top: 10
+
+  Label
+    id: lblGuild
+    text: Nome da Guild:
+    anchors.top: lblTitle.bottom
+    anchors.left: parent.left
+    margin-left: 75
+    margin-top: 10
+
+  TextEdit
+    id: editGuild
+    anchors.top: lblGuild.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-left: 10
+    margin-right: 10
+    height: 22
+
+  Label
+    id: lblLeaders
+    text: Nomes dos Leaders:
+    anchors.top: editGuild.bottom
+    anchors.left: parent.left
+    margin-left: 70
+    margin-top: 15
+
+  TextEdit
+    id: editLeaders
+    anchors.top: lblLeaders.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-left: 10
+    margin-right: 10
+    height: 22
+
+  Label
+    id: lblToggles
+    text: Ativacao dos Macros:
+    anchors.top: editLeaders.bottom
+    anchors.left: parent.left
+    margin-left: 70
+    margin-top: 15
+
+  Button
+    id: btnLeader
+    text: Leader
+    anchors.top: lblToggles.bottom
+    anchors.left: parent.left
+    margin-left: 20
+    margin-top: 10
+    width: 70
+
+  Button
+    id: btnOutfit
+    text: Outfit
+    anchors.top: lblToggles.bottom
+    anchors.horizontalCenter: parent.horizontalCenter
+    margin-top: 10
+    width: 70
+
+  Button
+    id: btnAttack
+    text: Attack
+    anchors.top: lblToggles.bottom
+    anchors.right: parent.right
+    margin-right: 20
+    margin-top: 10
+    width: 70
+
+  Button
+    id: btnSave
+    text: Salvar
+    anchors.bottom: parent.bottom
+    anchors.left: parent.left
+    margin-left: 25
+    margin-bottom: 10
+    width: 90
+
+  Button
+    id: btnClose
+    text: Fechar
+    anchors.bottom: parent.bottom
+    anchors.right: parent.right
+    margin-right: 25
+    margin-bottom: 10
+    width: 90
+]])
+
+local configWindow
+local comboIcon
+
+schedule(200, function()
+  configWindow = UI.createWindow('TadalaComboSetup', g_ui.getRootWidget())
+  configWindow:hide()
+
+  -- preencher campos
+  configWindow.editGuild:setText(storage.comboSystem.guildName)
+  configWindow.editLeaders:setText(storage.comboSystem.comboLeaderNames)
+
+  local function refreshButtons()
+    configWindow.btnLeader:setColor(storage.comboSystem.leaderEnabled and "#00FF00" or "#555555")
+    configWindow.btnOutfit:setColor(storage.comboSystem.outfitEnabled and "#00FF00" or "#555555")
+    configWindow.btnAttack:setColor(storage.comboSystem.attackEnabled and "#00FF00" or "#555555")
+  end
+
+  configWindow.btnLeader.onClick = function()
+    storage.comboSystem.leaderEnabled = not storage.comboSystem.leaderEnabled
+    refreshButtons()
+  end
+
+  configWindow.btnOutfit.onClick = function()
+    storage.comboSystem.outfitEnabled = not storage.comboSystem.outfitEnabled
+    refreshButtons()
+  end
+
+  configWindow.btnAttack.onClick = function()
+    storage.comboSystem.attackEnabled = not storage.comboSystem.attackEnabled
+    refreshButtons()
+  end
+
+  configWindow.btnSave.onClick = function()
+    storage.comboSystem.guildName = configWindow.editGuild:getText()
+    storage.comboSystem.comboLeaderNames = configWindow.editLeaders:getText()
+    refreshButtons()
+    info("Config Combo salva!")
+    configWindow:hide()
+  end
+
+  configWindow.btnClose.onClick = function()
+    configWindow:hide()
+  end
+
+  refreshButtons()
+end)
+
+-- ============================================================
+-- ⚙️ ÍCONE DE ATIVAÇÃO
+-- ============================================================
+comboIcon = addIcon("ComboSystem", {item = 3198, text = "Combo"}, function(icon, isOn)
+  storage.comboSystem.enabled = isOn
+  if isOn then
+    icon.text:setColor('#00FF00')
+    comboLeader:setOn()
+    leaderCall:setOn()
+    attackLeaderTarget:setOn()
+  else
+    icon.text:setColor('#FFFFFF')
+    comboLeader:setOff()
+    leaderCall:setOff()
+    attackLeaderTarget:setOff()
+  end
+end)
+
+local MOUSE_RIGHT_BUTTON = 2
+comboIcon.onMousePress = function(widget, pos, button)
+  if button == MOUSE_RIGHT_BUTTON and configWindow then
+    configWindow:show()
+    configWindow:raise()
+    configWindow:focus()
+    return true
+  end
+  return false
+end
+
+
+UI.Label("Contato-Oficial")
+UI.Label("Tadala-Script")
+setDefaultTab("Main")
+addButton("", "Script personalizado click aqui", function()
+  g_platform.openUrl("https://chat.whatsapp.com/E3huPBLt5hc2BQbefFMW33")
+end)
+UI.Separator()
+-- =========================
+-- MACROS A PARTIR DAQUI
+-- =========================
+-- Macro: Abrir Backpack
+local backId = getBack() and getBack():getId() or 2854
+mainBp = macro(1000, "", function()
+
+
+    local bpItem = getBack()
+    local bp = getContainer(0)
+
+
+    if not bp and bpItem then
+        g_game.open(bpItem)
+    end
+end)
+
+-- Ícone interativo para o macro da Backpack
+addIcon("mainBp",{item={id=backId, count=1}, text="Main-Bp"}, function(icon,isOn)
+    mainBp.setOn(isOn)
+    if isOn then
+        icon.text:setColor('#00FF00')
+    else
+        icon.text:setColor('#FFFFFF')
+    end
+end)
+
+
+-- AUTO PARTY
+setDefaultTab("Tools")
+
+local autopartyui = setupUI([[
+Panel
+  height: 38
+
+  BotSwitch
+    id: status
+    anchors.top: parent.top
+    anchors.left: parent.left
+    text-align: center
+    width: 130
+    height: 18
+    text: Auto Party
+
+  Button
+    id: editPlayerList
+    anchors.top: prev.top
+    anchors.left: prev.right
+    anchors.right: parent.right
+    margin-left: 3
+    height: 18
+    text: Setup
+
+  Button
+    id: ptLeave
+    text: Leave Party
+    anchors.left: parent.left
+    anchors.top: prev.bottom
+    width: 86
+    height: 17
+    margin-top: 3
+    color: #ee0000
+    font: verdana-11px-rounded
+
+  BotSwitch
+    id: ptShare
+    text: Auto Share
+    anchors.left: prev.right
+    anchors.bottom: prev.bottom
+    margin-left: 4
+    height: 17
+    width: 86
+]])
+
+g_ui.loadUIFromString([[
+AutoPartyName < Label
+  background-color: alpha
+  text-offset: 2 0
+  focusable: true
+  height: 16
+
+  $focus:
+    background-color: #00000055
+
+  Button
+    id: remove
+    text: x
+    anchors.right: parent.right
+    margin-right: 15
+    width: 15
+    height: 15
+
+AutoPartyListWindow < MainWindow
+  text: Auto Party
+  size: 200 315
+  @onEscape: self:hide()
+
+  Label
+    id: lblLeader
+    anchors.left: parent.left
+    anchors.right: parent.right
+    anchors.top: parent.top
+    anchors.right: parent.right
+    text-align: center
+    text: Leader Name
+
+  TextEdit
+    id: txtLeader
+    anchors.left: parent.left
+    anchors.right: parent.right
+    anchors.top: prev.bottom
+    margin-top: 5
+
+  Label
+    id: lblParty
+    anchors.left: parent.left
+    anchors.top: prev.bottom
+    anchors.right: parent.right
+    margin-top: 5
+    text-align: center
+    text: Party List
+
+  TextList
+    id: lstAutoParty
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-top: 5
+    margin-bottom: 5
+    padding: 1
+    height: 100
+    vertical-scrollbar: AutoPartyListListScrollBar
+
+  VerticalScrollBar
+    id: AutoPartyListListScrollBar
+    anchors.top: lstAutoParty.top
+    anchors.bottom: lstAutoParty.bottom
+    anchors.right: lstAutoParty.right
+    step: 14
+    pixels-scroll: true
+
+  TextEdit
+    id: playerName
+    anchors.left: parent.left
+    anchors.top: lstAutoParty.bottom
+    margin-top: 5
+    width: 120
+
+  Button
+    id: addPlayer
+    text: +
+    font: verdana-11px-rounded
+    anchors.right: parent.right
+    anchors.left: prev.right
+    anchors.top: prev.top
+    anchors.bottom: prev.bottom
+    margin-left: 3
+
+  HorizontalSeparator
+    id: separator
+    anchors.right: parent.right
+    anchors.left: parent.left
+    anchors.top: prev.bottom
+    margin-top: 8
+
+  CheckBox
+    id: inviteMsg
+    anchors.left: parent.left
+    anchors.right: parent.right
+    anchors.top: prev.bottom
+    margin-top: 6
+    text: Invite/Accept on Msg:
+    tooltip: If you are the leader, invite player that said this msg, else, accept party when someone say this.\n
+
+  TextEdit
+    id: inviteTxt
+    anchors.left: parent.left
+    anchors.right: parent.right
+    anchors.top: inviteMsg.bottom
+    margin-top: 5
+    width: 148
+
+  HorizontalSeparator
+    id: separator
+    anchors.right: parent.right
+    anchors.left: parent.left
+    anchors.bottom: closeButton.top
+    margin-bottom: 6
+
+  Button
+    id: closeButton
+    text: Close
+    font: cipsoftFont
+    anchors.right: parent.right
+    anchors.bottom: parent.bottom
+    size: 45 21
+
+  Button
+    id: info
+    text: Credits
+    font: cipsoftFont
+    anchors.left: parent.left
+    anchors.bottom: parent.bottom
+    size: 45 21
+    color: yellow
+    !tooltip: tr('Original made by Lee#7225\nModified by F.Almeida#8019')
+    @onClick: g_platform.openUrl("https://www.paypal.com/donate/?business=8XSU4KTS2V9PN&no_recurring=0&item_name=OTC+AND+OTS+SCRIPTS&currency_code=USD")
+]])
+
+local panelName = "autoParty"
+
+if not storage[panelName] then
+  storage[panelName] = {
+    leaderName = 'Leader',
+    autoPartyList = {},
+    enabled = false,
+    inviteTxt = 'party me',
+    autoShare = false,
+    onMsg = false,
+  }
+end
+
+local config = storage[panelName]
+
+rootWidget = g_ui.getRootWidget()
+if rootWidget then
+  tcAutoParty = autopartyui.status
+  tcAutoShare = autopartyui.ptShare
+
+  autoPartyListWindow = UI.createWindow('AutoPartyListWindow', rootWidget)
+  autoPartyListWindow:hide()
+
+  autopartyui.editPlayerList.onClick = function(widget)
+    autoPartyListWindow:show()
+    autoPartyListWindow:raise()
+    autoPartyListWindow:focus()
+  end
+
+  autopartyui.ptLeave.onClick = function(widget)
+    g_game.partyLeave()
+  end
+
+  autoPartyListWindow.closeButton.onClick = function(widget)
+    autoPartyListWindow:hide()
+  end
+
+  if config.autoPartyList and #config.autoPartyList > 0 then
+    for _, pName in ipairs(config.autoPartyList) do
+      local label = g_ui.createWidget("AutoPartyName", autoPartyListWindow.lstAutoParty)
+      label.remove.onClick = function(widget)
+        table.removevalue(config.autoPartyList, label:getText())
+        label:destroy()
+      end
+      label:setText(pName)
+    end
+  end
+  autoPartyListWindow.addPlayer.onClick = function(widget)
+    local playerName = autoPartyListWindow.playerName:getText()
+    if playerName:len() > 0 and not (table.contains(config.autoPartyList, playerName, true) or config.leaderName == playerName) then
+      table.insert(config.autoPartyList, playerName)
+      local label = g_ui.createWidget("AutoPartyName", autoPartyListWindow.lstAutoParty)
+      label.remove.onClick = function(widget)
+        table.removevalue(config.autoPartyList, label:getText())
+        label:destroy()
+      end
+      label:setText(playerName)
+      autoPartyListWindow.playerName:setText('')
+    end
+  end
+
+  autopartyui.status:setOn(config.enabled)
+  autopartyui.status.onClick = function(widget)
+    config.enabled = not config.enabled
+    widget:setOn(config.enabled)
+  end
+
+  autopartyui.ptShare:setOn(config.autoShare)
+  autopartyui.ptShare.onClick = function(widget)
+    config.autoShare = not config.autoShare
+    widget:setOn(config.autoShare)
+  end
+
+  autoPartyListWindow.inviteMsg:setChecked(config.onMsg)
+  autoPartyListWindow.inviteMsg.onClick = function(widget)
+    config.onMsg = not config.onMsg
+    widget:setChecked(config.onMsg)
+  end
+
+  autoPartyListWindow.playerName.onKeyPress = function(self, keyCode, keyboardModifiers)
+    if not (keyCode == 5) then
+      return false
+    end
+    autoPartyListWindow.addPlayer.onClick()
+    return true
+  end
+
+  autoPartyListWindow.playerName.onTextChange = function(widget, text)
+    if table.contains(config.autoPartyList, text, true) then
+      autoPartyListWindow.addPlayer:setColor("red")
+    else
+      autoPartyListWindow.addPlayer:setColor("green")
+    end
+  end
+
+  autoPartyListWindow.txtLeader.onTextChange = function(widget, text)
+    config.leaderName = text
+  end
+  autoPartyListWindow.txtLeader:setText(config.leaderName)
+
+  autoPartyListWindow.inviteTxt.onTextChange = function(widget, text)
+    config.inviteTxt = text
+  end
+  autoPartyListWindow.inviteTxt:setText(config.inviteTxt)
+  
+  -- main loop
+  macro(500,function()
+    -- BLOQUEIA EXECUÇÃO SE WORLD NÃO AUTORIZADO (SEM MENSAGEM)
+
+    if not config.enabled then return true end
+    local lider = player:getName():lower() == config.leaderName:lower()
+    for s, spec in pairs(getSpectators()) do
+      if spec:isPlayer() and spec ~= player then
+        if lider then
+          if spec:getShield() == 0 then
+            if table.find(config.autoPartyList,spec:getName(),true) then
+              g_game.partyInvite(spec:getId())
+            end
+          end
+        else
+          if spec:getShield() == 1 then
+           if spec:getName():lower() == config.leaderName:lower() then
+            g_game.partyJoin(spec:getId())
+           end
+          end
+        end
+      end
+    end
+    if lider and config.autoShare then
+      if not player:isPartySharedExperienceActive() then
+        g_game.partyShareExperience(true)
+      end
+    end
+  end)
+
+  -- invite on msg
+  onTalk(function(name, level, mode, text, channelId, pos)
+    if not config.enabled then return true end
+    if not config.onMsg or not string.find(text, config.inviteTxt) then return true end
+    local c = getCreatureByName(name)
+    if c then 
+      if c:isPlayer() and c ~= player then
+        if c:getShield() == 0 then
+          g_game.partyInvite(c:getId())
+        elseif c:getShield() == 1 then
+          g_game.partyJoin(c:getId())
+        end
+      end
+    end
+  end)
+end
+
+UI.Separator()
+
+setDefaultTab("War")
+-- Cave Bot -- Targeting
+local cIcon = addIcon("cI",{text="Cave\nBot",switchable=false,moveable=true}, function()
+    if CaveBot.isOff() then 
+      CaveBot.setOn()
+    else 
+      CaveBot.setOff()
+    end
+  end)
+  cIcon:setSize({height=30,width=50})
+  cIcon.text:setFont('verdana-11px-rounded')
+  
+  local tIcon = addIcon("tI",{text="Target\nBot",switchable=false,moveable=true}, function()
+    if TargetBot.isOff() then 
+      TargetBot.setOn()
+    else 
+      TargetBot.setOff()
+    end
+  end)
+  tIcon:setSize({height=30,width=50})
+  tIcon.text:setFont('verdana-11px-rounded')
+  
+  macro(50,function()
+
+    if CaveBot.isOn() then
+      cIcon.text:setColoredText({"CaveBot\n","white","ON","green"})
+    else
+      cIcon.text:setColoredText({"CaveBot\n","white","OFF","red"})
+    end
+    if TargetBot.isOn() then
+      tIcon.text:setColoredText({"Target\n","white","ON","green"})
+    else
+      tIcon.text:setColoredText({"Target\n","white","OFF","red"})
+    end
+  end)
+  
+  setDefaultTab("main")
+local panelName = "tcSkills"
+local tcSkillPanel = setupUI([[
+OutlineLabel < Label
+  height: 12
+  background-color: #00000044
+  opacity: 0.89
+  text-auto-resize: true
+  font: verdana-11px-rounded
+  anchors.left: parent.left
+  $first:
+    anchors.top: parent.top
+  $!first:
+    anchors.top: prev.bottom
+
+Panel
+  id: skillPanel
+  height: 50
+  width: 50
+  anchors.left: parent.left
+  anchors.bottom: parent.bottom
+  margin-bottom: 5
+  margin-left: 5
+]], modules.game_interface.getMapPanel())
+
+local skills = {
+  { name = "Fist", data = {}, id = 0, enabled = false, highlight = 'white' },
+  { name = "Club", data = {}, id = 1, enabled = false },
+  { name = "Sword", data = {}, id = 2, enabled = false },
+  { name = "Axe", data = {}, id = 3, enabled = false },
+  { name = "Distance", data = {}, id = 4, enabled = false },
+  { name = "Shielding", data = {}, id = 5, enabled = true },
+  { name = "Fishing", data = {}, id = 6, enabled = false },
+  { name = "Crit Chance", data = {}, id = 7, enabled = false },
+  { name = "Crit Damage", data = {}, id = 8, enabled = false },
+  { name = "Life Leech Chance", data = {}, id = 9, enabled = false },
+  { name = "Life Leech Amount", data = {}, id = 10, enabled = false },
+  { name = "Mana Leech Chance", data = {}, id = 11, enabled = false },
+  { name = "Mana Leech Amount", enabled = true , data = {}, id = 12, enabled = false },
+  { name = "Level",  data = {}, id = 13, enabled = true, color = '#aba71e', highlight = 'orange' },
+  { name = "Magic Level", data = {}, id = 14, enabled = true , color = '#4fc3f7', highlight = 'green'},
+  { name = "Stamina", data = {}, id = 15, enabled = true },
+}
+
+local firstSkill, lastSkill = 1, 13
+local levelSkill = 14
+local magicSkill = 15
+local stamSkill = 16
+
+function calcStamina()
+  local stam = stamina()
+  local hours = math.floor(stam / 60)
+  local minutes = stam % 60
+  if minutes < 10 then
+    minutes = '0' .. minutes
+  end
+  local percent = math.floor(100 * stam / (42 * 60))
+  return hours.. ':'.. minutes, ' ('..percent..'%)'
+end
+
+function checkStamina()
+  local skill = skills[stamSkill]
+  if skill and skill.enabled then
+    local label = tcSkillPanel[stamSkill] or UI.createWidget("OutlineLabel", tcSkillPanel)
+    label:setId(stamSkill)
+    local sta, per = calcStamina()
+    label:setColoredText({
+      '~ '..skill.name..': ', (skill.color or 'white'),
+      sta,(skill.highlight or 'green'),
+      per, (skill.color or 'white'),
+    })
+  end
+end
+
+function checkMagicLevel()
+  local skill = skills[magicSkill]
+  if skill.enabled then
+    local label = tcSkillPanel[magicSkill] or UI.createWidget("OutlineLabel", tcSkillPanel)
+    label:setId(magicSkill)
+
+    label:setColoredText({
+      '~ '..skill.name..': ', (skill.color or 'white'),
+      player:getMagicLevel(),(skill.highlight or 'green'),
+      ' ('..player:getMagicLevelPercent().. '%)', (skill.color or 'white'),
+    })
+  end
+end
+
+function checkSkill(num)
+  local skill = skills[num]
+  if skill and skill.enabled and skill.id then
+    local label = tcSkillPanel[skill.id] or UI.createWidget("OutlineLabel", tcSkillPanel)
+      label:setId(skill.id)
+
+    local t = {
+      '~ '..skill.name..': ', (skill.color or 'white'),
+      player:getSkillLevel(skill.id), (skill.highlight or 'green'),
+      ' ('..player:getSkillLevelPercent(skill.id).. '%)', (skill.color or 'white'),
+    }
+    label:setColoredText(t)
+  end
+end
+
+
+function checkLevel()
+  local skill = skills[levelSkill]
+  if skill.enabled then
+    local label = tcSkillPanel[levelSkill] or UI.createWidget("OutlineLabel", tcSkillPanel)
+    label:setId(levelSkill)
+
+    label:setColoredText({
+      '~ '..skill.name..': ', (skill.color or 'white'),
+      level(), (skill.highlight or 'green'),
+      ' ('.. player:getLevelPercent().. '%)', (skill.color or 'white'),
+    })
+  end
+end
+
+function checkAll()
+  checkLevel()
+  checkMagicLevel()
+  for i = firstSkill, lastSkill do
+    checkSkill(i, true)
+  end
+  checkStamina()
+  tcSkillPanel:setHeight((tcSkillPanel:getChildCount()*13))
+end
+
+local checkSkills = macro(2000, 'Check Skills', function()
+
+  checkAll()
+end)
+
+checkAll()
+
+
+UI.Separator()
+setDefaultTab("War")
+-- SD Alvo
+local sdtarget = macro(200, "SD Target", function()
+
+    if not g_game.isAttacking() then return end
+    if not g_game.getAttackingCreature():canShoot() then return end
+    useWith(tonumber(storage.runeTarget), g_game.getAttackingCreature())
+    delay(500)
+end)
+
+-- Input para definir a rune
+UI.TextEdit(storage.runeTarget or "14263", function(widget, text)
+    storage.runeTarget = text
+end)
+
+UI.Separator()
+
+-- Ícone do macro
+addIcon("SDTARGET", {item=tonumber(storage.runeTarget) or 14263, text="SD Target"}, function(icon, isOn)
+    sdtarget.setOn(isOn)
+
+    if isOn then
+        icon.text:setColor('#00FF00')
+    else
+        icon.text:setColor('#FFFFFF')
+        -- Atualiza o ícone **sempre que o macro for ligado**, pegando o ID atual do TextEdit
+        local runeId = tonumber(storage.runeTarget) or 14263
+        icon.item:setId(runeId)
+    end
+end)
+
+setDefaultTab("War")
+UI.Separator()
+UI.Label("Friend List (Sio)")
+
+-- campo para lista de nomes
+UI.TextEdit(storage.friendListNames or "", function(widget, text)
+  storage.friendListNames = text
+end)
+
+-- campo de texto para % de HP do sio
+UI.Label("Sio HP Trigger (%)")
+UI.TextEdit(storage.sioHpPercentText or "85", function(widget, text)
+  local number = tonumber(text)
+  if number and number >= 1 and number <= 100 then
+    storage.sioHpPercentText = text
+    storage.sioHpPercent = number
+  else
+  end
+end)
+
+-- função para comparar nomes da lista
+local function isFriend(name)
+  for friend in string.gmatch(storage.friendListNames or "", '([^,]+)') do
+    local trimmed = friend:match("^%s*(.-)%s*$")
+    if trimmed:lower() == name:lower() then
+      return true
+    end
+  end
+  return false
+end
+
+-- macro principal
+macro(200, "Sio Guild/Friends", function()
+
+  local playerHp = player:getHealthPercent()
+  if playerHp <= 80 then
+    return
+  end
+
+  local triggerPercent = storage.sioHpPercent or 85
+
+  local specs = getSpectators()
+  if #specs == 0 then
+    return
+  end
+
+  for _, spec in ipairs(specs) do
+    if spec:isPlayer() and spec ~= player and spec:canShoot() then
+      local name = spec:getName()
+      local emblem = spec:getEmblem()
+      local specHp = spec:getHealthPercent()
+
+
+      if (emblem == 1 or isFriend(name)) and specHp < triggerPercent then
+        cast('exura sio "' .. name .. '"')
+        break
+      end
+    end
+  end
+end)
+
+
+
+
+--[[Esconder Magias Laranjas da tela]]--
+TH = macro(100,function() end)
+
+
+onStaticText(function(thing, text)
+    if TH.isOff() then return end
+    if not text:find('says:') then
+        g_map.cleanTexts()
+    end
+end)
+addIcon("TH", {item=3547, text="Esc-Msg"}, function(icon, isOn)
+TH.setOn(isOn)
+if isOn then
+  icon.text:setColor('#00FF00') -- Verde ativado
+else
+  icon.text:setColor('#FFFFFF') -- Branco desativado
+end
+end)
+
+--[[Esconder MAGIAS(SPRITES)]]--
+sprh = macro(100, "", function() end)
+
+
+onAddThing(function(tile, thing)
+    if sprh.isOff() then return end
+    if thing:isEffect() then
+        thing:hide()
+    end
+end)
+
+addIcon("sprh", {item=3547, text="Esc-Mag"}, function(icon, isOn)
+    
+sprh.setOn(isOn)
+if isOn then
+  icon.text:setColor('#00FF00') -- Verde ativado
+else
+  icon.text:setColor('#FFFFFF') -- Branco desativado
+end
+end)
+
+-- Hold Target
+local targetID = nil
+
+-- ESC para cancelar o alvo fixo
+onKeyPress(function(keys)
+    if keys == "Escape" and targetID then
+        targetID = nil
+    end
+end)
+
+-- Macro principal do Hold Target
+HoldTarget = macro(100, "", function()
+    -- BLOQUEIA EXECUÇÃO SE WORLD NÃO AUTORIZADO (SEM MENSAGEM)
+
+    -- Se estiver atacando e no mesmo andar, salva o target
+    if target() and target():getPosition().z == posz() and not target():isNpc() then
+        targetID = target():getId()
+    elseif not target() then
+        -- Se não há target salvo, não faz nada
+        if not targetID then return end
+
+        -- Procura o target salvo no mesmo andar
+        for i, spec in ipairs(getSpectators()) do
+            local sameFloor = spec:getPosition().z == posz()
+            local oldTarget = spec:getId() == targetID
+
+            if sameFloor and oldTarget then
+                attack(spec)
+            end
+        end
+    end
+end)
+
+
+local leftItemId = getLeft() and getLeft():getId() or 3419  -- 3419 = escudo padrão fallback (Dwarven Shield)
+
+
+addIcon("HoldTarget", {item={id=leftItemId, count=1}, text="Hold Target"}, function(icon, isOn)
+    HoldTarget.setOn(isOn)
+    if isOn then
+        icon.text:setColor('#00FF00') -- Verde ativado
+    else
+        icon.text:setColor('#FFFFFF') -- Branco desativado
+    end
+end)
+
+
+Correr = macro(100, "", function()
+
+    
+    if isParalyzed() then
+      say("utani Gran Hur")
+    end
+  
+    if not hasHaste() then
+      say("utani Gran Hur")
+    end
+  end)
+  
+  addIcon("Correr",{item=3079, text="U-Hur"}, function(icon,isOn)
+  Correr.setOn(isOn)
+   if isOn then
+    icon.text:setColor('#00FF00')
+   else
+    icon.text:setColor('#FFFFFF')
+   end
+  end)
+
+
+
+setDefaultTab("Tools")
+  -- Painel principal
+local panelName = "nextBackpackConfig"
+
+-- Configuração padrão
+if not storage[panelName] then
+  storage[panelName] = {
+    emptyIds = "2870,2854,9604,2866,2871", -- BPs para abrir quando estão quase vazios
+    fullIds = "2867" -- BPs para abrir quando estão cheios
+  }
+end
+
+-- UI
+UI.Separator()
+UI.Label("Next Backpack (IDs)")
+
+UI.Label("Backpacks Vazios:")
+UI.TextEdit(storage[panelName].emptyIds, function(widget, text)
+  storage[panelName].emptyIds = text
+end)
+
+UI.Label("Backpacks Cheios:")
+UI.TextEdit(storage[panelName].fullIds, function(widget, text)
+  storage[panelName].fullIds = text
+end)
+
+UI.Separator()
+
+-- Função auxiliar: converte string em tabela de números
+local function stringToIdTable(str)
+  local ids = {}
+  if not str or str == "" then
+    return ids
+  end
+  for num in str:gmatch("%d+") do
+    table.insert(ids, tonumber(num))
+  end
+  return ids
+end
+
+-- Macro unificado
+nextBackpack = macro(100, function()
+
+    
+  local emptyIds = stringToIdTable(storage[panelName].emptyIds)
+  local fullIds = stringToIdTable(storage[panelName].fullIds)
+
+  for _, container in pairs(getContainers()) do
+    local containerItem = container:getContainerItem()
+
+    if containerItem then
+      local containerId = containerItem:getId()
+
+      -- Caso 1: abrir próximo quando está quase vazio (1 item e é container)
+      if table.contains(emptyIds, containerId) then
+        if container:getItemsCount() == 1 then
+          local item = container:getItem(0)
+          if item and item:isContainer() then
+            g_game.open(item, container)
+            delay(200)
+          end
+        end
+      end
+
+      -- Caso 2: abrir próximo quando está cheio
+      if table.contains(fullIds, containerId) then
+        if container:getCapacity() == container:getItemsCount() then
+          for _, item in ipairs(container:getItems()) do
+            if item:isContainer() then
+              g_game.open(item, container)
+              delay(200)
+              break
+            end
+          end
+        end
+      end
+    end
+  end
+end)
+
+-- Ícone (igual ao original)
+nextbackpack = addIcon("nextBackpack", {item = 2870, text = "Next", textColor = "#FFFFFF"}, function(icon, isOn)
+  nextBackpack.setOn(isOn)
+  icon.text:setColor(isOn and '#00FF00' or '#FFFFFF')
+end)
+
+setDefaultTab("Main")
+--FOLLOW
+addSeparator()
+leaderPositions = {}
+local leaderDirections = {}
+local leader
+local lastLeaderFloor
+local ropeId = 3003
+local standTime = now
+
+FloorChangers = {
+  RopeSpots = {
+      Up = {386},
+      Down = {}
+  },
+  Use = {
+      Up = {1948, 5542, 16693, 16692, 1723, 7771, 5102, 5111, 5120, 9556, 8259, 5131, 8261, 5122},
+      Down = {435}
+  }
+}
+
+local function handleUse(pos)
+  local lastZ = posz()
+  if posz() == lastZ then
+      local newTile = g_map.getTile({x = pos.x, y = pos.y, z = pos.z})
+      if newTile then
+          g_game.use(newTile:getTopUseThing())
+      end
+  end
+end
+
+local function handleRope(pos)
+  local lastZ = posz()
+  if posz() == lastZ then
+      local newTile = g_map.getTile({x = pos.x, y = pos.y, z = pos.z})
+      if newTile then
+          useWith(ropeId, newTile:getTopUseThing())
+      end
+  end
+end
+
+local floorChangeSelector = {
+  RopeSpots = {Up = handleRope, Down = handleRope},
+  Use = {Up = handleUse, Down = handleUse}
+}
+
+local function distance(pos1, pos2)
+  local pos2 = pos2 or player:getPosition()
+  return math.abs(pos1.x - pos2.x) + math.abs(pos1.y - pos2.y)
+end
+
+local function executeClosest(possibilities)
+  local closest
+  local closestDistance = 99
+  for _, data in ipairs(possibilities) do
+      local dist = distance(data.pos)
+      if dist < closestDistance then
+          closest = data
+          closestDistance = dist
+      end
+  end
+
+  if closest then
+      closest.changer(closest.pos)
+      return true
+  end
+
+  return false
+end
+
+local function handleFloorChange()
+  local range = 1
+  local p = player:getPosition()
+  local possibleChangers = {}
+  for _, dir in ipairs({"Down", "Up"}) do
+      for changer, data in pairs(FloorChangers) do
+          for x = -range, range do
+              for y = -range, range do
+                  local tile = g_map.getTile({x = p.x + x, y = p.y + y, z = p.z})
+                  if tile and tile:getTopUseThing() then
+                      if table.find(data[dir], tile:getTopUseThing():getId()) then
+                          table.insert(
+                              possibleChangers,
+                              {changer = floorChangeSelector[changer][dir], pos = {x = p.x + x, y = p.y + y, z = p.z}}
+                          )
+                      end
+                  end
+              end
+          end
+      end
+  end
+  if #possibleChangers > 0 then
+      return executeClosest(possibleChangers)
+  end
+
+  return false
+end
+
+local function levitate(dir)
+  turn(dir)
+  schedule(
+      200,
+      function()
+          say('exani hur "down')
+          say('exani hur "up')
+      end
+  )
+end
+
+local function matchPos(p1, p2)
+  return (p1.x == p2.x and p1.y == p2.y)
+end
+
+local function handleUsing()
+  -- if BotServerFollow.isOff() then
+      handleFloorChange()
+  -- else
+  --     local usePos = leaderUsePositions[posz()]
+  --     if usePos then
+  --         local useTile = g_map.getOrCreateTile(usePos)
+  --         if useTile then
+  --             use(useTile:getTopUseThing())
+  --         end
+  --     end
+  -- end
+end
+
+local function useRope(pos)
+  if not pos then
+      pos = player:getPosition()
+  end
+
+  local dirs = {{0, 0}, {-1, 0}, {1, 0}, {0, -1}, {0, 1}, {1, -1}, {1, 1}, {-1, 1}, {-1, -1}}
+
+  for i = 1, #dirs do
+      local tpos = {x = pos.x + dirs[i][1], y = pos.y + dirs[i][2], z = posz()}
+      local tile = g_map.getTile(tpos)
+
+      if tile then
+          if tile:getGround() then
+              local ropeSpots = FloorChangers.RopeSpots.Up
+              if table.contains(ropeSpots, tile:getGround():getId()) then
+                  local waitTime = getDistanceBetween(player:getPosition(), tpos) * 60
+                  handleRope(tpos)
+                  delay(waitTime)
+                  return true
+              end
+          end
+      end
+  end
+
+  return false
+end
+
+local function getStandTime()
+  return now - standTime
+end
+
+ultimateFollow =
+  macro(
+  50,
+  "Follow",
+  
+  function()
+
+    
+      if not leader then
+          local leaderPos = leaderPositions[posz()]
+          if leaderPos and getDistanceBetween(player:getPosition(), leaderPos) > 0 then
+              autoWalk(leaderPos, 70, {ignoreNonPathable = true, precision = 0})
+              delay(200)
+              return
+          end
+
+          -- if BotServerFollow.isOff() then
+              if handleFloorChange() then
+                  return
+              end
+
+              local dir = leaderDirections[posz()]
+              if dir then
+                  levitate(dir)
+              end
+          -- else
+          --     local levitatePos = listenedLeaderPosDir
+          --     if levitatePos and matchPos(player:getPosition(), levitatePos) then
+          --         levitate(listenedLeaderDir)
+          --         return
+          --     end
+
+          --     if useRope(leaderPos) then
+          --         return
+          --     end
+
+          --     handleUsing()
+          -- end
+      else
+          listenedLeaderPosDir = nil
+          listenedLeaderDir = nil
+
+          local lpos = leader:getPosition()
+          local parameters = {ignoreNonPathable = true, precision = 1, ignoreCreatures = true}
+          local path = findPath(player:getPosition(), lpos, 40, parameters)
+          local distance = getDistanceBetween(player:getPosition(), lpos)
+          if distance > 1 and not path then
+              handleUsing()
+          elseif distance > 2 then
+              if getStandTime() > 500 then
+                  autoWalk(lpos, 40, parameters)
+                  delay(200)
+              end
+          end
+      end
+  end
+)
+
+
+UI.Label("Follow Player:")
+
+UI.TextEdit(
+  storage.followLeader or "Name",
+  function(widget, text)
+      storage.followLeader = text
+      leader = getCreatureByName(text)
+  end
+)
+
+onCreaturePositionChange(
+  function(creature, newPos, oldPos)
+      if ultimateFollow.isOff() then
+          return
+      end
+
+      if creature:getName() == player:getName() then
+          standTime = now
+          return
+      end
+
+      if creature:getName():lower() ~= storage.followLeader:lower() then
+          return
+      end
+
+      if newPos then
+          leaderPositions[newPos.z] = newPos
+          lastLeaderFloor = newPos.z
+          if newPos.z == posz() then
+              leader = creature
+          else
+              leader = nil
+          end
+      else
+          leader = nil
+      end
+
+      if oldPos then
+          if newPos and oldPos.z ~= newPos.z then
+              leaderDirections[oldPos.z] = creature:getDirection()
+          end
+
+          local oldTile = g_map.getTile(oldPos)
+          local walkPrecision = 1
+          if oldTile then
+              if not oldTile:hasCreature() then
+                  walkPrecision = 0
+              end
+          end
+
+          autoWalk(oldPos, 40, {ignoreNonPathable = 1, precision = walkPrecision})
+      end
+  end
+)
+
+onCreatureAppear(
+  function(creature)
+      if ultimateFollow.isOff() then
+          return
+      end
+      if creature:getPosition().z ~= posz() then
+          return
+      end
+
+      if creature:getName():lower() == storage.followLeader:lower() then
+          leader = creature
+      elseif creature:getName() == player:getName() then
+          if lastLeaderFloor and lastLeaderFloor == posz() then
+              leader = getCreatureByName(storage.followLeader)
+          end
+      end
+  end
+)
+
+onCreatureDisappear(
+  function(creature)
+      if ultimateFollow.isOff() then
+          return
+      end
+      if creature:getPosition().z == posz() then
+          return
+      end
+
+      if creature:getName():lower() == storage.followLeader:lower() then
+          leader = nil
+      elseif creature:getName() == player:getName() and posz() ~= lastLeaderFloor then
+          leader = nil
+      end
+  end
+)
+
+
+--XP HR
+function comma_value(amount)
+  local formatted = tostring(amount)
+  while true do
+    formatted, k = string.gsub(formatted, "^(-?%d+)(%d%d%d)", '%1,%2')
+    if k == 0 then break end
+  end
+  return formatted
+end
+
+local totalExp = 0
+local startTime = 0
+
+local expTracking = false
+
+local expTrackerMacro = macro(1000, function()
+  if not expTracking or totalExp == 0 then
+    expIcon:setText("Enable Exp/h")
+    return
+  end
+  local elapsed = os.time() - startTime
+  local expPerHour = (totalExp / elapsed) * 3600
+  expIcon:setText(comma_value(math.floor(expPerHour)) .. " exp/h")
+end)
+expTrackerMacro:setOff()
+
+onTextMessage(function(mode, text)
+  if not expTracking then return end
+  local expGained = text:match("You gained (%d+) experience")
+  if expGained then
+    totalExp = totalExp + tonumber(expGained)
+  end
+end)
+
+expIcon = addIcon("expIcon", {text="Enable Exp/h"}, function(widget)
+  expTracking = not expTracking
+  if expTracking then
+    totalExp = 0
+    startTime = os.time()
+    expTrackerMacro:setOn()
+  else
+    expTrackerMacro:setOff()
+    widget:setText("Enable Exp/h")
+  end
+end)
+
+expIcon:setWidth(150)
+
+targetID = nil
+
+
+-- equip ssa
+
+local amulet = 3081
+local equip_ammy = null
+if getNeck() then equip_ammy = getNeck():getId() end
+scriptSsa = macro(50, "", function()
+
+
+if hppercent() <= 100 and (getNeck() == null or getNeck():getId() ~= amulet) then
+g_game.equipItemId(amulet)
+delay(200)
+elseif hppercent() >= 101 and (getNeck() == null or equip_ammy and getNeck():getId() ~= equip_ammy) then
+g_game.equipItemId(equip_ammy)
+delay(200)
+end
+end)
+addIcon("scriptSsa", {item=3081, text="SSA-ON"}, function(icon, isOn)
+scriptSsa.setOn(isOn)
+if isOn then
+  icon.text:setColor('#00FF00')
+else
+  icon.text:setColor('#FFFFFF')
+end
+end)
+
+-- RING BP FECHADA
+setDefaultTab("main")
+getActiveItemId = function(id)
+  local activeItems = {
+      [3049] = 3086, [3050] = 3087, [3051] = 3088, [3052] = 3089, [3053] = 3090,
+      [3091] = 3094, [3092] = 3095, [3093] = 3096, [3097] = 3099, [3098] = 3100,
+      [16114] = 16264, [23531] = 23532, [23533] = 23534, [23529] = 23530,
+      [30343] = 30342, [30344] = 30345, [30403] = 30402, [31621] = 31616, [32621] = 32635
+  }
+  return activeItems[id] or id
+end
+
+-- Configuração dos Anéis
+addSeparator()
+UI.Label("RingBpFechada"):setColor("white")
+
+local defaultSettings = {
+  ring1 = {on=false, title="HP%", item=3006, min=51, max=90}, -- Life Ring (Exemplo)
+  ring2 = {on=false, title="HP%", item=3051, min=0, max=50},  -- Energy Ring (Exemplo)
+  ring3 = {on=false, title="HP%", item=3098, min=30, max=70}  -- Exemplo de terceiro anel
+}
+
+for key, value in pairs(defaultSettings) do
+  if type(storage[key]) ~= "table" then
+      storage[key] = value
+  end
+end
+
+-- Criar macros para anéis
+for _, healingInfo in ipairs({storage.ring1, storage.ring2, storage.ring3}) do
+  local healingMacro = macro(100, function()
+      local minHP, maxHP = healingInfo.min, healingInfo.max
+      local id, idActive = healingInfo.item, getActiveItemId(healingInfo.item)
+
+      if hppercent() >= minHP and hppercent() <= maxHP then
+          if not getFinger() or getFinger():getId() ~= idActive then
+              g_game.equipItemId(id) -- Procura e equipa automaticamente o anel
+          end
+      end
+  end)
+
+  healingMacro.setOn(healingInfo.on)
+
+  UI.DualScrollItemPanel(healingInfo, function(widget, newParams)
+      healingInfo = newParams
+      healingMacro.setOn(healingInfo.on and healingInfo.item > 100)
+  end)
+end
+
+
+-- AFK FAMOUS
+local secondsToIdle = 5
+local activeFPS =  60
+---------------------------------------------------------
+setDefaultTab("Tools")
+local afkFPS = 0
+function botPrintMessage(message)
+  modules.game_textmessage.displayGameMessage(message)
+end
+
+botPrintMessage("[Idle-Mode] made by: Famous7464")
+
+local function isSameMousePos(p1,p2)
+  return p1.x == p2.x and p1.y == p2.y
+end
+
+local function setAfk()
+  modules.client_options.setOption("backgroundFrameRate", afkFPS)
+  modules.game_interface.gameMapPanel:hide()
+end
+
+local function setActive()
+  modules.client_options.setOption("backgroundFrameRate", activeFPS)
+  modules.game_interface.gameMapPanel:show()
+end
+
+
+local lastMousePos = nil
+local finalMousePos = nil
+local idleCount = 0
+local maxIdle = secondsToIdle * 4
+macro(250, "AFK Mode Famous7464", function()
+  local currentMousePos = g_window.getMousePosition()
+
+  if finalMousePos then
+    if isSameMousePos(finalMousePos,currentMousePos) then return end
+    botPrintMessage("(AFK Mode Famous7464) Active!")
+    setActive()
+    finalMousePos = nil
+  end
+
+  if lastMousePos and isSameMousePos(lastMousePos,currentMousePos) then
+    idleCount = idleCount + 1
+  else
+    lastMousePos = currentMousePos
+    idleCount = 0
+  end
+
+  if idleCount == maxIdle then
+    botPrintMessage("(AFK Bot) AFK!")
+    setAfk()
+    finalMousePos = currentMousePos
+    idleCount = 0
+  end
+
+end)
+
+local otemId 
+
+local config = {
+    delaySeconds = 30,
+    itemId = 9388
+}
+
+if player:getBlessings() == 0 then
+    say("!bless")
+        use(config.itemId)
+    schedule(2000, function() 
+        if player:getBlessings() == 0 then
+            warn("!! Blessings not bought !!")
+        end
+    end)
+end
+
+
+local spell = "utamo vita"
+local interval = 150000
+local lastCast = 0
+
+
+utamo = macro(200, "", function()
+  if not g_game.isOnline() then return end
+  local shieldActive = hasManaShield()
+  local nowTime = now
+
+  -- Usa utamo se não está ativo ou passou o tempo do intervalo
+  if not shieldActive or (nowTime - lastCast >= interval) then
+    say(spell)
+    lastCast = nowTime
+  end
+end)
+
+addIcon("utamo", {item=3548, text="Utamo"}, function(icon, isOn)
+  utamo.setOn(isOn)
+  if isOn then
+    icon.text:setColor('#00FF00')
+  else
+    icon.text:setColor('#FFFFFF')
+  end
+end)
+
+
+-- UE
+function distanceFromPlayer(coords)
+    if not coords then return false end
+    return getDistanceBetween(pos(), coords)
+end
+
+function getMonstersInRange(pos, range)
+    if not pos or not range then return false end
+    local monsters = 0
+    for _, spec in ipairs(getSpectators()) do
+        if spec:isMonster() and
+            (g_game.getClientVersion() < 960 or spec:getType() < 3) and
+            getDistanceBetween(pos, spec:getPosition()) < range then
+            monsters = monsters + 1
+        end
+    end
+    return monsters
+end
+
+-----------------------------------
+-- M-Tera-PK
+-----------------------------------
+macroTeraPK = macro(200, "", function()
+    local target = g_game.getAttackingCreature()
+    if target then
+        if manapercent() < 1 then return end
+        if target:getHealthPercent() > 100 then return end
+        if distanceFromPlayer(target:getPosition()) > 5 then return end
+        if getMonstersInRange(pos(), 8) < 0 then return end
+        say("Exevo Gran Mas Tera")
+        delay(500)
+    end
+end)
+macroTeraPK.setOn(false)
+
+addIcon("iconTeraPK", {item={id=8081, count=1}, text="Tera-PK", textColor="#FFFFFF"}, function(icon, isOn)
+    macroTeraPK.setOn(isOn)
+    if isOn then
+        icon.text:setColor('#00FF00')
+    else
+        icon.text:setColor('#FFFFFF')
+    end
+end)
+
+-----------------------------------
+-- M-Frigo-PK
+-----------------------------------
+macroFrigoPK = macro(200, "", function()
+    local target = g_game.getAttackingCreature()
+    if target then
+        if manapercent() < 1 then return end
+        if target:getHealthPercent() > 100 then return end
+        if distanceFromPlayer(target:getPosition()) > 5 then return end
+        if getMonstersInRange(pos(), 8) < 0 then return end
+        say("Exevo Gran Mas Frigo")
+        delay(500)
+    end
+end)
+macroFrigoPK.setOn(false)
+
+addIcon("iconFrigoPK", {item={id=8079, count=1}, text="Frigo-PK", textColor="#FFFFFF"}, function(icon, isOn)
+    macroFrigoPK.setOn(isOn)
+    if isOn then
+        icon.text:setColor('#00FF00')
+    else
+        icon.text:setColor('#FFFFFF')
+    end
+end)
+
+-----------------------------------
+-- M-Pox-PK
+-----------------------------------
+macroPoxPK = macro(200, "", function()
+    local target = g_game.getAttackingCreature()
+    if target then
+        if manapercent() < 1 then return end
+        if target:getHealthPercent() > 100 then return end
+        if distanceFromPlayer(target:getPosition()) > 5 then return end
+        if getMonstersInRange(pos(), 8) < 0 then return end
+        say("Exevo Gran Mas Pox")
+        delay(500)
+    end
+end)
+macroPoxPK.setOn(false)
+
+addIcon("iconPoxPK", {item={id=105, count=1}, text="Pox-PK", textColor="#FFFFFF"}, function(icon, isOn)
+    macroPoxPK.setOn(isOn)
+    if isOn then
+        icon.text:setColor('#00FF00')
+    else
+        icon.text:setColor('#FFFFFF')
+    end
+end)
+
+
+setDefaultTab("cave")
+addButton("", "Cavebot 100% AFK Click aqui", function()
+  g_platform.openUrl("https://chat.whatsapp.com/E3huPBLt5hc2BQbefFMW33")
+end)
+
+
+setDefaultTab("war")
+UI.Separator()
+UI.Label("Friend List (Gran Sio)")
+
+-- campo para lista de nomes
+UI.TextEdit(storage.friendListNames or "", function(widget, text)
+  storage.friendListNames = text
+end)
+
+-- campo de texto para % de HP do sio
+UI.Label("Sio HP Trigger (%)")
+UI.TextEdit(storage.sioHpPercentText or "85", function(widget, text)
+  local number = tonumber(text)
+  if number and number >= 1 and number <= 100 then
+    storage.sioHpPercentText = text
+    storage.sioHpPercent = number
+  else
+  end
+end)
+
+-- função para comparar nomes da lista
+local function isFriend(name)
+  for friend in string.gmatch(storage.friendListNames or "", '([^,]+)') do
+    local trimmed = friend:match("^%s*(.-)%s*$")
+    if trimmed:lower() == name:lower() then
+      return true
+    end
+  end
+  return false
+end
+
+-- macro principal
+macro(200, "Gran Sio Guild/Friends", function()
+
+  local playerHp = player:getHealthPercent()
+  if playerHp <= 80 then
+    return
+  end
+
+  local triggerPercent = storage.sioHpPercent or 85
+
+  local specs = getSpectators()
+  if #specs == 0 then
+    return
+  end
+
+  for _, spec in ipairs(specs) do
+    if spec:isPlayer() and spec ~= player and spec:canShoot() then
+      local name = spec:getName()
+      local emblem = spec:getEmblem()
+      local specHp = spec:getHealthPercent()
+
+
+      if (emblem == 1 or isFriend(name)) and specHp < triggerPercent then
+        cast('exura gran sio "' .. name .. '"')
+        break
+      end
+    end
+  end
+end)
+
+-- UTITOFAST BAIAK 
+
+local lastUtito = 0
+
+UtitoFast = macro(100, "", function()
+
+  local now = now or g_clock.millis()
+  if now - lastUtito >= 60000 then
+    say("Utito Fast Baiak")
+    lastUtito = now
+  end
+end)
+
+
+addIcon("UtitoFast", {item=29351, text="Utito-FB"}, function(icon, isOn)
+  UtitoFast.setOn(isOn)
+  if isOn then
+    icon.text:setColor('#00FF00') -- Verde ativado
+  else
+    icon.text:setColor('#FFFFFF') -- Branco desativado
+  end
+end)
+
